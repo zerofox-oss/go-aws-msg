@@ -16,7 +16,7 @@ import (
 )
 
 // NewTopic returns an sqs.Topic with fully configured SQSAPI
-func NewTopic(queueURL string) (*Topic, error) {
+func NewTopic(queueURL string) (msg.Topic, error) {
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err

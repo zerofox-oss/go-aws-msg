@@ -152,9 +152,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 //
 // SQS_ENDPOINT can be set as an environment variable in order to
 // override the aws.Client's Configured Endpoint
-func NewServer(queueURL string, cl int, retryTimeout int64) (*Server, error) {
-
-	// Initialize SQS Session, returns AWS error if we cannot create a session
+func NewServer(queueURL string, cl int, retryTimeout int64) (msg.Server, error) {
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
@@ -189,6 +187,5 @@ func NewServer(queueURL string, cl int, retryTimeout int64) (*Server, error) {
 		receiverCtx:           receiverCtx,
 		receiverCancelFunc:    receiverCancelFunc,
 	}
-
 	return srv, nil
 }
