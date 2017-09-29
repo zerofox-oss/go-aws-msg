@@ -165,10 +165,10 @@
 			"revisionTime": "2016-08-03T19:07:31Z"
 		},
 		{
-			"checksumSHA1": "kYNWGtAX+I8eC87P3yde/8A2ye8=",
+			"checksumSHA1": "/na0s1RNJ/MSue5gt0EqJBCIaEU=",
 			"path": "github.com/zerofox-oss/go-msg",
-			"revision": "0c142a126bd1b72b98ea9a6ad219c24c3c6e8998",
-			"revisionTime": "2017-09-18T13:14:39Z"
+			"revision": "e3a7b46ce070909bed644872816c0a25dc245a27",
+			"revisionTime": "2017-09-29T19:08:34Z"
 		}
 	],
 	"rootPath": "github.com/zerofox-oss/go-aws-msg"
