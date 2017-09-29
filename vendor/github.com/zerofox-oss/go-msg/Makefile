@@ -2,7 +2,7 @@ GOTOOLS = \
 	github.com/golang/lint/golint \
 	golang.org/x/tools/cmd/goimports
 
-PACKAGES=$(shell go list ./... | grep -v '^github.com/zerofox-oss/go-aws-msg/vendor/')
+PACKAGES=$(shell go list ./...)
 
 all: lint test
 

@@ -1,5 +1,8 @@
 # go-aws-msg
 
+[![GoDoc](https://godoc.org/github.com/zerofox-oss/go-aws-msg?status.svg)](http://godoc.org/github.com/zerofox-oss/go-aws-msg)
+[![Build Status](https://travis-ci.org/zerofox-oss/go-aws-msg.svg?branch=master)](https://travis-ci.org/zerofox-oss/go-aws-msg)
+
 **AWS Pub/Sub Primitives for Go**
 
 This library contains
