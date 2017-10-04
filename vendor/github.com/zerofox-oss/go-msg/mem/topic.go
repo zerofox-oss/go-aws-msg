@@ -2,6 +2,7 @@ package mem
 
 import (
 	"bytes"
+	"context"
 	"sync"
 
 	"github.com/zerofox-oss/go-msg"
@@ -12,9 +13,12 @@ type Topic struct {
 	C chan *msg.Message
 }
 
+// Ensure that Topic implements msg.Topic
+var _ msg.Topic = &Topic{}
+
 // NewWriter returns a MessageWriter.
 // The MessageWriter may be used to write messages to a channel.
-func (t *Topic) NewWriter() msg.MessageWriter {
+func (t *Topic) NewWriter(context.Context) msg.MessageWriter {
 	return &MessageWriter{
 		c: t.C,
 

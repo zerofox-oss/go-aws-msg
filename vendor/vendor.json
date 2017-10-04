@@ -177,16 +177,16 @@
 			"revisionTime": "2016-08-03T19:07:31Z"
 		},
 		{
-			"checksumSHA1": "/na0s1RNJ/MSue5gt0EqJBCIaEU=",
+			"checksumSHA1": "Ylq7frl7tWpZ95EbCM8WpmsutpA=",
 			"path": "github.com/zerofox-oss/go-msg",
-			"revision": "e3a7b46ce070909bed644872816c0a25dc245a27",
-			"revisionTime": "2017-09-29T19:08:34Z"
+			"revision": "a23c9bd942fd421eba5ba559a3531c2227f09dbf",
+			"revisionTime": "2017-10-04T15:25:01Z"
 		},
 		{
-			"checksumSHA1": "tOwqkbHOaAZF6YXaaKr79GB0G0Y=",
+			"checksumSHA1": "G9SHBhB8bFWGyN7DGiM5HrICpII=",
 			"path": "github.com/zerofox-oss/go-msg/mem",
-			"revision": "e3a7b46ce070909bed644872816c0a25dc245a27",
-			"revisionTime": "2017-09-29T19:08:34Z"
+			"revision": "a23c9bd942fd421eba5ba559a3531c2227f09dbf",
+			"revisionTime": "2017-10-04T15:25:01Z"
 		}
 	],
 	"rootPath": "github.com/zerofox-oss/go-aws-msg"

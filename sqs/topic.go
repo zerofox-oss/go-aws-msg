@@ -2,6 +2,7 @@ package sqs
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"os"
 	"strings"
@@ -47,12 +48,13 @@ type Topic struct {
 }
 
 // NewWriter returns a new sqs.MessageWriter
-func (t *Topic) NewWriter() msg.MessageWriter {
+func (t *Topic) NewWriter(ctx context.Context) msg.MessageWriter {
 	return &MessageWriter{
 		attributes: make(map[string][]string),
 		buf:        &bytes.Buffer{},
 		sqsClient:  t.Svc,
 		queueURL:   t.QueueURL,
+		ctx:        ctx,
 	}
 }
 
@@ -67,6 +69,8 @@ type MessageWriter struct {
 
 	sqsClient sqsiface.SQSAPI
 	queueURL  string
+
+	ctx context.Context
 }
 
 // Attributes returns the msg.Attributes associated with the MessageWriter
@@ -107,7 +111,7 @@ func (w *MessageWriter) Close() error {
 	}
 
 	log.Printf("[TRACE] writing to sqs: %v", sqsParams)
-	if _, err := w.sqsClient.SendMessage(sqsParams); err != nil {
+	if _, err := w.sqsClient.SendMessageWithContext(w.ctx, sqsParams); err != nil {
 		return err
 	}
 	return nil
