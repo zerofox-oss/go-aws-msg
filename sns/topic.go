@@ -2,6 +2,7 @@ package sns
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"os"
 	"strings"
@@ -84,11 +85,12 @@ func NewUnencodedTopic(topicARN string) (msg.Topic, error) {
 
 // NewWriter returns a sns.MessageWriter instance for writing to
 // the configured SNS topic.
-func (t *Topic) NewWriter() msg.MessageWriter {
+func (t *Topic) NewWriter(ctx context.Context) msg.MessageWriter {
 	return &MessageWriter{
 		attributes: make(map[string][]string),
 		snsClient:  t.Svc,
 		topicARN:   t.TopicARN,
+		ctx:        ctx,
 	}
 }
 
@@ -104,6 +106,8 @@ type MessageWriter struct {
 
 	snsClient snsiface.SNSAPI
 	topicARN  string
+
+	ctx context.Context
 }
 
 // Attributes returns the msg.Attributes associated with the MessageWriter.
@@ -133,7 +137,7 @@ func (w *MessageWriter) Close() error {
 	}
 
 	log.Printf("[TRACE] writing to sns: %v", snsPublishParams)
-	if _, err := w.snsClient.Publish(snsPublishParams); err != nil {
+	if _, err := w.snsClient.PublishWithContext(w.ctx, snsPublishParams); err != nil {
 		return err
 	}
 	return nil

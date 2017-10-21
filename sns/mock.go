@@ -3,6 +3,8 @@ package sns
 import (
 	"testing"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sns/snsiface"
 )
@@ -18,7 +20,7 @@ type mockSNSAPI struct {
 
 // Publish mocks the SNSAPI's Publish function. Instead of publishing to an SNS
 // topic, it puts the input onto a channel. This allows for test assertions.
-func (s *mockSNSAPI) Publish(input *sns.PublishInput) (*sns.PublishOutput, error) {
+func (s *mockSNSAPI) PublishWithContext(ctx aws.Context, input *sns.PublishInput, options ...request.Option) (*sns.PublishOutput, error) {
 	s.sentParamChan <- input
 	return nil, nil
 }

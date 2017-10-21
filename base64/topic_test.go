@@ -1,6 +1,7 @@
 package base64
 
 import (
+	"context"
 	"testing"
 
 	msg "github.com/zerofox-oss/go-msg"
@@ -14,7 +15,7 @@ func TestEncoder(t *testing.T) {
 	t1 := mem.Topic{C: c}
 	t2 := Encoder(&t1)
 
-	w := t2.NewWriter()
+	w := t2.NewWriter(context.Background())
 	w.Write([]byte("hello,"))
 	w.Write([]byte("world!"))
 	w.Close()
@@ -39,7 +40,7 @@ func TestEncoder_SingleUse(t *testing.T) {
 	t1 := mem.Topic{C: c}
 	t2 := Encoder(&t1)
 
-	w := t2.NewWriter()
+	w := t2.NewWriter(context.Background())
 	w.Write([]byte("dont try to use this twice!"))
 	w.Close()
 

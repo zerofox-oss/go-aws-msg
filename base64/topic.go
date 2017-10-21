@@ -2,6 +2,7 @@ package base64
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"sync"
 
@@ -10,9 +11,9 @@ import (
 
 // Encoder wraps a topic with another which base64-encodes a Message.
 func Encoder(next msg.Topic) msg.Topic {
-	return msg.TopicFunc(func() msg.MessageWriter {
+	return msg.TopicFunc(func(ctx context.Context) msg.MessageWriter {
 		return &encodeWriter{
-			Next: next.NewWriter(),
+			Next: next.NewWriter(ctx),
 		}
 	})
 }

@@ -1,6 +1,7 @@
 package sns
 
 import (
+	"context"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -51,7 +52,7 @@ func TestMessageWriter_WriteAndCloseReturnErrorAfterFirstClose(t *testing.T) {
 		TopicARN: "test-arn",
 	}
 
-	mw := tpc.NewWriter()
+	mw := tpc.NewWriter(context.Background())
 
 	go func() {
 		<-svc.sentParamChan
@@ -85,13 +86,13 @@ func TestMessageWriter_CloseProperlyConstructsPublishInput(t *testing.T) {
 
 	msg := []byte("test message")
 
-	mw := tpc.NewWriter()
+	mw := tpc.NewWriter(context.Background())
 	mw.Attributes().Set("key", "value")
 
 	go func() {
 		// Construct "expected" Attributes on unrelated MessageWriter
 		// (including the additional base64)
-		m2 := tpc.NewWriter()
+		m2 := tpc.NewWriter(context.Background())
 		m2.Attributes().Set("key", "value")
 		m2.Attributes().Set("Content-Transfer-Encoding", "base64")
 
