@@ -153,6 +153,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // SQS_ENDPOINT can be set as an environment variable in order to
 // override the aws.Client's Configured Endpoint
 func NewServer(queueURL string, cl int, retryTimeout int64) (msg.Server, error) {
+	// It makes no sense to have a concurrency of less than 1.
+	if cl < 1 {
+		log.Printf("[WARN] Requesting concurrency of %d, this makes no sense, setting to 1\n", cl)
+		cl = 1
+	}
+
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
