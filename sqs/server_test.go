@@ -60,7 +60,7 @@ func newSQSMessages(n int) *[]*sqs.Message {
 }
 
 // TestServer_Serve tests that an SQS server can receive messages, process
-// them, and delete them from the queue succesfully.
+// them, and delete them from the queue successfully.
 func TestServer_Serve(t *testing.T) {
 	msgs := newSQSMessages(1)
 	mockSQS := newMockSQSAPI(msgs, t)
@@ -98,7 +98,7 @@ func TestServer_Concurrency(t *testing.T) {
 }
 
 // TestServer_Serve tests that an SQS server can receive messages, process
-// them, and delete them from the queue succesfully.
+// them, and delete them from the queue successfully.
 func TestServer_ServeFailingReceiver(t *testing.T) {
 	msgs := newSQSMessages(1)
 	mockSQS := newMockSQSAPI(msgs, t)
@@ -124,8 +124,8 @@ func TestServer_ConvertToMsgAttrs(t *testing.T) {
 	awsMsg := &sqs.Message{
 		Body: &str,
 		MessageAttributes: map[string]*sqs.MessageAttributeValue{
-			"key1": &sqs.MessageAttributeValue{StringValue: &val1},
-			"key2": &sqs.MessageAttributeValue{StringValue: &val2},
+			"key1": {StringValue: &val1},
+			"key2": {StringValue: &val2},
 		},
 	}
 	serv := &Server{}
