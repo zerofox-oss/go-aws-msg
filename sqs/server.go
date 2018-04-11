@@ -3,6 +3,8 @@ package sqs
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -10,7 +12,9 @@ import (
 	"github.com/zerofox-oss/go-msg"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
@@ -31,6 +35,7 @@ type Server struct {
 	receiverCancelFunc context.CancelFunc // CancelFunc for all receiver routines
 	serverCtx          context.Context    // context used to control the life of the Server
 	serverCancelFunc   context.CancelFunc // CancelFunc to signal the server should stop requesting messages
+	session            *session.Session   // session used to re-create `Svc` when needed
 }
 
 // convertToMsgAttrs creates msg.Attributes from sqs.Message.Attributes
@@ -144,6 +149,35 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 }
 
+// DefaultRetryer implements an AWS `request.Retryer` that has a custom delay
+// for credential errors (403 statuscode).
+// This is needed in order to wait for credentials to be valid for SQS requests
+// due to AWS "eventually consistent" credentials:
+// https://docs.aws.amazon.com/IAM/latest/UserGuide/troubleshoot_general.html
+type DefaultRetryer struct {
+	request.Retryer
+	delay time.Duration
+}
+
+// RetryRules returns the delay for the next request to be made
+func (r DefaultRetryer) RetryRules(req *request.Request) time.Duration {
+	if req.HTTPResponse.StatusCode == 403 {
+		return r.delay
+	}
+	return r.Retryer.RetryRules(req)
+}
+
+// ShouldRetry determines if the passed request should be retried
+func (r DefaultRetryer) ShouldRetry(req *request.Request) bool {
+	if req.HTTPResponse.StatusCode == 403 {
+		return true
+	}
+	return r.Retryer.ShouldRetry(req)
+}
+
+// Option is the signature that modifies a `Server` to set some configuration
+type Option func(*Server) error
+
 // NewServer creates and initializes a new Server using queueURL to a SQS queue
 // `cl` represents the number of concurrent message receives (10 msgs each).
 //
@@ -152,7 +186,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 //
 // SQS_ENDPOINT can be set as an environment variable in order to
 // override the aws.Client's Configured Endpoint
-func NewServer(queueURL string, cl int, retryTimeout int64) (msg.Server, error) {
+func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg.Server, error) {
 	// It makes no sense to have a concurrency of less than 1.
 	if cl < 1 {
 		log.Printf("[WARN] Requesting concurrency of %d, this makes no sense, setting to 1\n", cl)
@@ -176,6 +210,10 @@ func NewServer(queueURL string, cl int, retryTimeout int64) (msg.Server, error) 
 	if url := os.Getenv("SQS_ENDPOINT"); url != "" {
 		conf.Endpoint = aws.String(url)
 	}
+	conf.Retryer = DefaultRetryer{
+		Retryer: client.DefaultRetryer{NumMaxRetries: 7},
+		delay:   2 * time.Second,
+	}
 
 	// Create an SQS Client with creds from the Environment
 	svc := sqs.New(sess, conf)
@@ -192,6 +230,54 @@ func NewServer(queueURL string, cl int, retryTimeout int64) (msg.Server, error) 
 		serverCancelFunc:      serverCancelFunc,
 		receiverCtx:           receiverCtx,
 		receiverCancelFunc:    receiverCancelFunc,
+		session:               sess,
 	}
+
+	for _, opt := range opts {
+		if err = opt(srv); err != nil {
+			return nil, fmt.Errorf("Failed setting option: %s", err)
+		}
+	}
+
 	return srv, nil
+}
+
+func getConf(s *Server) (*aws.Config, error) {
+	sqs, ok := s.Svc.(*sqs.SQS)
+	if !ok {
+		return nil, errors.New("`Svc` could not be casted to a SQS client")
+	}
+	return &sqs.Client.Config, nil
+}
+
+// WithCustomRetryer sets a custom `Retryer` to use on the SQS client.
+func WithCustomRetryer(r request.Retryer) Option {
+	return func(s *Server) error {
+		c, err := getConf(s)
+		if err != nil {
+			return err
+		}
+		c.Retryer = r
+		s.Svc = sqs.New(s.session, c)
+		return nil
+	}
+}
+
+// WithRetries makes the `Server` retry on credential errors until
+// `max` attempts with `delay` seconds between requests.
+// This is needed in scenarios where credentials are automatically generated
+// and the program starts before AWS finishes propagating them
+func WithRetries(delay time.Duration, max int) Option {
+	return func(s *Server) error {
+		c, err := getConf(s)
+		if err != nil {
+			return err
+		}
+		c.Retryer = DefaultRetryer{
+			Retryer: client.DefaultRetryer{NumMaxRetries: max},
+			delay:   delay,
+		}
+		s.Svc = sqs.New(s.session, c)
+		return nil
+	}
 }

@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +80,64 @@ func TestServer_Serve(t *testing.T) {
 	defer cancel()
 	if err := mockSQS.WaitForAllDeletes(ctx); err != nil {
 		t.Errorf(err.Error())
+	}
+}
+
+func TestServer_Serve_retries(t *testing.T) {
+	retries := make([]*http.Request, 0, 3)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := ioutil.ReadAll(r.Body)
+		t.Logf("Request: %s\n", b)
+		retries = append(retries, r)
+		w.WriteHeader(403)
+		fmt.Fprintln(w, `<?xml version="1.0"?><ErrorResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/"><Error><Type>Sender</Type><Code>InvalidClientTokenId</Code><Message>The security token included in the request is invalid.</Message><Detail/></Error><RequestId>ee1c20d5-2537-5e47-97b1-73909c83231a</RequestId></ErrorResponse>`)
+	}))
+	defer ts.Close()
+
+	os.Setenv("SQS_ENDPOINT", ts.URL)
+	os.Setenv("AWS_ACCESS_KEY_ID", "AKIyJLQDLOCKWMFHfake")
+	os.Setenv("AWS_SECRET_ACCESS_KEY", "T1PERSo63zFp1q5AGkGERmqOLQNZGfFu6iqAfake")
+
+	defer func() {
+		os.Unsetenv("SQS_ENDPOINT")
+		os.Unsetenv("AWS_ACCESS_KEY_ID")
+		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
+	}()
+
+	cases := []struct {
+		name     string
+		options  []Option
+		numTries int
+	}{
+		{"default", nil, 8},
+		{"1 retry", []Option{WithRetries(0, 1)}, 2},
+		{"No retries", []Option{WithRetries(0, 0)}, 1},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			retries = make([]*http.Request, 0, 3)
+			srv, err := NewServer(ts.URL+"/queue", 1, 1, c.options...)
+			if err != nil {
+				t.Errorf("Server creation should not fail: %s", err)
+			}
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				srv.Shutdown(ctx)
+				cancel()
+			}()
+
+			r := &SimpleReceiver{t: t}
+			err = srv.Serve(r)
+			if strings.Index(err.Error(), "InvalidClientTokenId: The security token included in the request is invalid") != 0 {
+				t.Errorf("Expected error message to start with `InvalidClientTokenId: The security token included in the request is invalid`, was `%s`", err.Error())
+			}
+
+			t.Logf("retries: %v", retries)
+			if len(retries) != c.numTries {
+				t.Errorf("It should try %d times before failing, was %d", c.numTries, len(retries))
+			}
+		})
 	}
 }
 

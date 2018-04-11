@@ -103,13 +103,13 @@ func newMockServer(concurrency int, mockSQS *mockSQSAPI) *Server {
 	receiverCtx, receiverCancelFunc := context.WithCancel(context.Background())
 
 	srv := &Server{
-		QueueURL: "https://myqueue.com",
-		Svc:      mockSQS,
 		maxConcurrentReceives: make(chan struct{}, concurrency),
 		receiverCtx:           receiverCtx,
 		receiverCancelFunc:    receiverCancelFunc,
 		serverCtx:             serverCtx,
 		serverCancelFunc:      serverCancelFunc,
+		QueueURL:              "https://myqueue.com",
+		Svc:                   mockSQS,
 	}
 
 	return srv
