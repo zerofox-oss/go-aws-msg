@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sns/snsiface"
-	b64 "github.com/zerofox-oss/go-aws-msg/base64"
 	msg "github.com/zerofox-oss/go-msg"
+	b64 "github.com/zerofox-oss/go-msg/decorators/base64"
 )
 
 // Topic configures and manages SNSAPI for sns.MessageWriter.
