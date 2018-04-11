@@ -6,7 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/zerofox-oss/go-msg"
+	msg "github.com/zerofox-oss/go-msg"
 )
 
 // Tests that msgAttributesToSNSAttributes successfully converts msg.Attributes
