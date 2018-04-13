@@ -9,8 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/zerofox-oss/go-msg"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -18,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	msg "github.com/zerofox-oss/go-msg"
 )
 
 // Server represents a msg.Server for receiving messages
@@ -243,11 +242,11 @@ func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg
 }
 
 func getConf(s *Server) (*aws.Config, error) {
-	sqs, ok := s.Svc.(*sqs.SQS)
+	svc, ok := s.Svc.(*sqs.SQS)
 	if !ok {
-		return nil, errors.New("`Svc` could not be casted to a SQS client")
+		return nil, errors.New("Svc could not be casted to a SQS client")
 	}
-	return &sqs.Client.Config, nil
+	return &svc.Client.Config, nil
 }
 
 // WithCustomRetryer sets a custom `Retryer` to use on the SQS client.

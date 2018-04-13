@@ -14,8 +14,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sqs"
-
-	"github.com/zerofox-oss/go-msg"
+	msg "github.com/zerofox-oss/go-msg"
 )
 
 // Failing receiver returns an error upon consumption of a Message.
