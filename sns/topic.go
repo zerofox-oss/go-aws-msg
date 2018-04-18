@@ -3,16 +3,23 @@ package sns
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sns/snsiface"
+
+	"github.com/zerofox-oss/go-aws-msg/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 	b64 "github.com/zerofox-oss/go-msg/decorators/base64"
 )
@@ -21,6 +28,50 @@ import (
 type Topic struct {
 	Svc      snsiface.SNSAPI
 	TopicARN string
+	session  *session.Session
+}
+
+func getConf(t *Topic) (*aws.Config, error) {
+	svc, ok := t.Svc.(*sns.SNS)
+	if !ok {
+		return nil, errors.New("Svc could not be casted to a SNS client")
+	}
+	return &svc.Client.Config, nil
+}
+
+// Option is the signature that modifies a `Topic` to set some configuration
+type Option func(*Topic) error
+
+// WithCustomRetryer sets a custom `Retryer` to use on the SQS client.
+func WithCustomRetryer(r request.Retryer) Option {
+	return func(t *Topic) error {
+		c, err := getConf(t)
+		if err != nil {
+			return err
+		}
+		c.Retryer = r
+		t.Svc = sns.New(t.session, c)
+		return nil
+	}
+}
+
+// WithRetries makes the `Server` retry on credential errors until
+// `max` attempts with `delay` seconds between requests.
+// This is needed in scenarios where credentials are automatically generated
+// and the program starts before AWS finishes propagating them
+func WithRetries(delay time.Duration, max int) Option {
+	return func(t *Topic) error {
+		c, err := getConf(t)
+		if err != nil {
+			return err
+		}
+		c.Retryer = retryer.DefaultRetryer{
+			Retryer: client.DefaultRetryer{NumMaxRetries: max},
+			Delay:   delay,
+		}
+		t.Svc = sns.New(t.session, c)
+		return nil
+	}
 }
 
 // NewTopic returns a sns.Topic with fully configured SNSAPI.
@@ -31,7 +82,7 @@ type Topic struct {
 // messages are base64-encoded as a best practice.
 //
 // You may use NewUnencodedTopic if you wish to ignore the encoding step.
-func NewTopic(topicARN string) (msg.Topic, error) {
+func NewTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
@@ -51,17 +102,31 @@ func NewTopic(topicARN string) (msg.Topic, error) {
 		conf.Endpoint = aws.String(url)
 	}
 
-	return b64.Encoder(&Topic{
+	t := &Topic{
 		Svc:      sns.New(sess, conf),
 		TopicARN: topicARN,
-	}), nil
+		session:  sess,
+	}
+
+	// Default retryer
+	if err = WithRetries(2*time.Second, 7)(t); err != nil {
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		if err = opt(t); err != nil {
+			return nil, fmt.Errorf("cannot set option: %s", err)
+		}
+	}
+
+	return b64.Encoder(t), nil
 }
 
 // NewUnencodedTopic creates an concrete SNS msg.Topic
 //
 // Messages published by the `Topic` returned will not
 // have the body base64-encoded.
-func NewUnencodedTopic(topicARN string) (msg.Topic, error) {
+func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
@@ -77,10 +142,24 @@ func NewUnencodedTopic(topicARN string) (msg.Topic, error) {
 		conf.Endpoint = aws.String(url)
 	}
 
-	return &Topic{
+	t := &Topic{
 		Svc:      sns.New(sess, conf),
 		TopicARN: topicARN,
-	}, nil
+		session:  sess,
+	}
+
+	// Default retryer
+	if err = WithRetries(2*time.Second, 7)(t); err != nil {
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		if err = opt(t); err != nil {
+			return nil, fmt.Errorf("cannot set option: %s", err)
+		}
+	}
+
+	return t, nil
 }
 
 // NewWriter returns a sns.MessageWriter instance for writing to
@@ -124,7 +203,7 @@ func (w *MessageWriter) Close() error {
 	w.mux.Lock()
 	defer w.mux.Unlock()
 
-	if w.closed == true {
+	if w.closed {
 		return msg.ErrClosedMessageWriter
 	}
 	w.closed = true
@@ -137,10 +216,8 @@ func (w *MessageWriter) Close() error {
 	}
 
 	log.Printf("[TRACE] writing to sns: %v", snsPublishParams)
-	if _, err := w.snsClient.PublishWithContext(w.ctx, snsPublishParams); err != nil {
-		return err
-	}
-	return nil
+	_, err := w.snsClient.PublishWithContext(w.ctx, snsPublishParams)
+	return err
 }
 
 // Write writes data to the MessageWriter's internal buffer for aggregation
@@ -152,7 +229,7 @@ func (w *MessageWriter) Write(p []byte) (int, error) {
 	w.mux.Lock()
 	defer w.mux.Unlock()
 
-	if w.closed == true {
+	if w.closed {
 		return 0, msg.ErrClosedMessageWriter
 	}
 	return w.buf.Write(p)
