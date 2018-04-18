@@ -2,7 +2,14 @@ package sns
 
 import (
 	"context"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sns"
@@ -130,4 +137,76 @@ func TestMessageWriter_CloseProperlyConstructsPublishInput(t *testing.T) {
 	mw.Close()
 
 	<-control
+}
+
+type constructor func(string, ...Option) (msg.Topic, error)
+
+func TestMessageWriter_Close_retryer(t *testing.T) {
+	retries := make([]*http.Request, 0, 3)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := ioutil.ReadAll(r.Body)
+		t.Logf("Request: %s\n", b)
+		retries = append(retries, r)
+		w.WriteHeader(403)
+		fmt.Fprintln(w, `
+<ErrorResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <Error>
+    <Type>Sender</Type>
+    <Code>InvalidClientTokenId</Code>
+    <Message>The security token included in the request is invalid.</Message>
+  </Error>
+  <RequestId>590d5457-e4b6-5464-a482-071900d4c7d6</RequestId>
+</ErrorResponse>`)
+	}))
+	defer ts.Close()
+
+	os.Setenv("SNS_ENDPOINT", ts.URL)
+	os.Setenv("AWS_ACCESS_KEY_ID", "fake")
+	os.Setenv("AWS_SECRET_ACCESS_KEY", "fake")
+
+	defer func() {
+		os.Unsetenv("SNS_ENDPOINT")
+		os.Unsetenv("AWS_ACCESS_KEY_ID")
+		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
+	}()
+
+	cases := []struct {
+		name     string
+		newTopic constructor
+		options  []Option
+		numTries int
+	}{
+		{"default", NewTopic, nil, 8},
+		{"1 retry", NewTopic, []Option{WithRetries(0, 1)}, 2},
+		{"No retries", NewTopic, []Option{WithRetries(0, 0)}, 1},
+		{"UnencodedTopic default", NewUnencodedTopic, nil, 8},
+		{"UnencodedTopic 1 retry", NewUnencodedTopic, []Option{WithRetries(0, 1)}, 2},
+		{"UnencodedTopic No retries", NewUnencodedTopic, []Option{WithRetries(0, 0)}, 1},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			retries = make([]*http.Request, 0, 3)
+			tpc, err := c.newTopic("arn:aws:sns:us-west-2:777777777777:test-sns", c.options...)
+			if err != nil {
+				t.Errorf("Server creation should not fail: %s", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			w := tpc.NewWriter(ctx)
+
+			w.Write([]byte("it's full of stars!"))
+			err = w.Close()
+
+			if strings.Index(err.Error(), "InvalidClientTokenId: The security token included in the request is invalid") != 0 {
+				t.Errorf("Expected error message to start with `InvalidClientTokenId: The security token included in the request is invalid`, was `%s`", err.Error())
+			}
+
+			t.Logf("retries: %v", retries)
+			if len(retries) != c.numTries {
+				t.Errorf("It should try %d times before failing, was %d", c.numTries, len(retries))
+			}
+		})
+	}
 }
