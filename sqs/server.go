@@ -16,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+
+	"github.com/zerofox-oss/go-aws-msg/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 )
 
@@ -148,32 +150,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 }
 
-// DefaultRetryer implements an AWS `request.Retryer` that has a custom delay
-// for credential errors (403 statuscode).
-// This is needed in order to wait for credentials to be valid for SQS requests
-// due to AWS "eventually consistent" credentials:
-// https://docs.aws.amazon.com/IAM/latest/UserGuide/troubleshoot_general.html
-type DefaultRetryer struct {
-	request.Retryer
-	delay time.Duration
-}
-
-// RetryRules returns the delay for the next request to be made
-func (r DefaultRetryer) RetryRules(req *request.Request) time.Duration {
-	if req.HTTPResponse.StatusCode == 403 {
-		return r.delay
-	}
-	return r.Retryer.RetryRules(req)
-}
-
-// ShouldRetry determines if the passed request should be retried
-func (r DefaultRetryer) ShouldRetry(req *request.Request) bool {
-	if req.HTTPResponse.StatusCode == 403 {
-		return true
-	}
-	return r.Retryer.ShouldRetry(req)
-}
-
 // Option is the signature that modifies a `Server` to set some configuration
 type Option func(*Server) error
 
@@ -199,6 +175,10 @@ func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg
 	conf := &aws.Config{
 		Credentials: credentials.NewCredentials(&credentials.EnvProvider{}),
 		Region:      aws.String("us-west-2"),
+		Retryer: retryer.DefaultRetryer{
+			Retryer: client.DefaultRetryer{NumMaxRetries: 7},
+			Delay:   2 * time.Second,
+		},
 	}
 
 	// http://docs.aws.amazon.com/sdk-for-go/api/aws/client/#Config
@@ -208,10 +188,6 @@ func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg
 
 	if url := os.Getenv("SQS_ENDPOINT"); url != "" {
 		conf.Endpoint = aws.String(url)
-	}
-	conf.Retryer = DefaultRetryer{
-		Retryer: client.DefaultRetryer{NumMaxRetries: 7},
-		delay:   2 * time.Second,
 	}
 
 	// Create an SQS Client with creds from the Environment
@@ -234,7 +210,7 @@ func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg
 
 	for _, opt := range opts {
 		if err = opt(srv); err != nil {
-			return nil, fmt.Errorf("Failed setting option: %s", err)
+			return nil, fmt.Errorf("cannot set option: %s", err)
 		}
 	}
 
@@ -272,9 +248,9 @@ func WithRetries(delay time.Duration, max int) Option {
 		if err != nil {
 			return err
 		}
-		c.Retryer = DefaultRetryer{
+		c.Retryer = retryer.DefaultRetryer{
 			Retryer: client.DefaultRetryer{NumMaxRetries: max},
-			delay:   delay,
+			Delay:   delay,
 		}
 		s.Svc = sqs.New(s.session, c)
 		return nil

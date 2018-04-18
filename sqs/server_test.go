@@ -94,8 +94,8 @@ func TestServer_Serve_retries(t *testing.T) {
 	defer ts.Close()
 
 	os.Setenv("SQS_ENDPOINT", ts.URL)
-	os.Setenv("AWS_ACCESS_KEY_ID", "AKIyJLQDLOCKWMFHfake")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "T1PERSo63zFp1q5AGkGERmqOLQNZGfFu6iqAfake")
+	os.Setenv("AWS_ACCESS_KEY_ID", "foo")
+	os.Setenv("AWS_SECRET_ACCESS_KEY", "bar")
 
 	defer func() {
 		os.Unsetenv("SQS_ENDPOINT")
