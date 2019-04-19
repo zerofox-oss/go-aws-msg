@@ -65,7 +65,9 @@ func TestMessageWriter_WriteAndCloseReturnErrorAfterFirstClose(t *testing.T) {
 		<-svc.sentParamChan
 	}()
 
-	mw.Write([]byte("test"))
+	if _, err := mw.Write([]byte("test")); err != nil {
+		t.Fatalf("could not write message %s", err)
+	}
 	mw.Close()
 
 	if _, err := mw.Write([]byte("test2")); err != msg.ErrClosedMessageWriter {
@@ -133,7 +135,9 @@ func TestMessageWriter_CloseProperlyConstructsPublishInput(t *testing.T) {
 		control <- struct{}{}
 	}()
 
-	mw.Write(msg)
+	if _, err := mw.Write(msg); err != nil {
+		t.Fatalf("could not write message %s", err)
+	}
 	mw.Close()
 
 	<-control
@@ -196,7 +200,9 @@ func TestMessageWriter_Close_retryer(t *testing.T) {
 			defer cancel()
 			w := tpc.NewWriter(ctx)
 
-			w.Write([]byte("it's full of stars!"))
+			if _, err := w.Write([]byte("it's full of stars!")); err != nil {
+				t.Fatalf("could not write message %s", err)
+			}
 			err = w.Close()
 
 			if strings.Index(err.Error(), "InvalidClientTokenId: The security token included in the request is invalid") != 0 {

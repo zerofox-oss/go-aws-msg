@@ -72,7 +72,9 @@ func TestServer_Serve(t *testing.T) {
 
 	go func() {
 		r := &SimpleReceiver{t: t}
-		srv.Serve(r)
+		if err := srv.Serve(r); err != nil {
+			t.Errorf("server died %s", err)
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -122,7 +124,9 @@ func TestServer_Serve_retries(t *testing.T) {
 			}
 			defer func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				srv.Shutdown(ctx)
+				if err := srv.Shutdown(ctx); err != nil {
+					t.Logf("server shutdown failed %s", err)
+				}
 				cancel()
 			}()
 
@@ -149,7 +153,9 @@ func TestServer_Concurrency(t *testing.T) {
 
 	go func() {
 		r := &SimpleReceiver{t: t}
-		srv.Serve(r)
+		if err := srv.Serve(r); err != nil {
+			t.Errorf("server died %s", err)
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -168,7 +174,9 @@ func TestServer_ServeFailingReceiver(t *testing.T) {
 
 	go func() {
 		r := &FailingReceiver{t: t}
-		srv.Serve(r)
+		if err := srv.Serve(r); err != nil {
+			t.Errorf("server died %s", err)
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -200,18 +208,6 @@ func TestServer_ConvertToMsgAttrs(t *testing.T) {
 	}
 }
 
-// Test Shutdown with a nil context.Context.
-func TestServer_ShutdownWithoutContext(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("We expected a panic, recover() was not nil")
-		}
-	}()
-
-	srv := &Server{}
-	srv.Shutdown(nil)
-}
-
 // Tests that ErrServerClosed when all go routines finish before the context
 // cancels.
 func TestServer_ShutdownClean(t *testing.T) {
@@ -222,7 +218,9 @@ func TestServer_ShutdownClean(t *testing.T) {
 
 	go func() {
 		r := &SimpleReceiver{t: t}
-		srv.Serve(r)
+		if err := srv.Serve(r); err != msg.ErrServerClosed {
+			t.Logf("server died %s", err)
+		}
 	}()
 
 	err := srv.Shutdown(ctx)
@@ -241,7 +239,9 @@ func TestServer_ShutdownHard(t *testing.T) {
 
 	go func() {
 		r := &SimpleReceiver{t: t}
-		srv.Serve(r)
+		if err := srv.Serve(r); err != msg.ErrServerClosed {
+			t.Logf("server died %s", err)
+		}
 	}()
 
 	err := srv.Shutdown(ctx)
