@@ -104,17 +104,18 @@ func (w *MessageWriter) Close() error {
 	}
 	w.closed = true
 
-	sqsParams := &sqs.SendMessageInput{
-		MessageBody:       aws.String(w.buf.String()),
-		QueueUrl:          aws.String(w.queueURL),
-		MessageAttributes: buildSQSAttributes(w.Attributes()),
+	params := &sqs.SendMessageInput{
+		MessageBody: aws.String(w.buf.String()),
+		QueueUrl:    aws.String(w.queueURL),
 	}
 
-	log.Printf("[TRACE] writing to sqs: %v", sqsParams)
-	if _, err := w.sqsClient.SendMessageWithContext(w.ctx, sqsParams); err != nil {
-		return err
+	if len(*w.Attributes()) > 0 {
+		params.MessageAttributes = buildSQSAttributes(w.Attributes())
 	}
-	return nil
+
+	log.Printf("[TRACE] writing to sqs: %v", params)
+	_, err := w.sqsClient.SendMessageWithContext(w.ctx, params)
+	return err
 }
 
 // buildSNSAttributes converts msg.Attributes into SQS message attributes.

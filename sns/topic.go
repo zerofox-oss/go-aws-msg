@@ -208,15 +208,17 @@ func (w *MessageWriter) Close() error {
 	}
 	w.closed = true
 
-	attrs := buildSNSAttributes(w.Attributes())
-	snsPublishParams := &sns.PublishInput{
-		Message:           aws.String(string(w.buf.String())),
-		TopicArn:          aws.String(w.topicARN),
-		MessageAttributes: attrs,
+	params := &sns.PublishInput{
+		Message:  aws.String(string(w.buf.String())),
+		TopicArn: aws.String(w.topicARN),
 	}
 
-	log.Printf("[TRACE] writing to sns: %v", snsPublishParams)
-	_, err := w.snsClient.PublishWithContext(w.ctx, snsPublishParams)
+	if len(*w.Attributes()) > 0 {
+		params.MessageAttributes = buildSNSAttributes(w.Attributes())
+	}
+
+	log.Printf("[TRACE] writing to sns: %v", params)
+	_, err := w.snsClient.PublishWithContext(w.ctx, params)
 	return err
 }
 
