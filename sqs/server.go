@@ -98,11 +98,15 @@ func (s *Server) Serve(r msg.Receiver) error {
 
 					if err != nil {
 						log.Printf("[ERROR] Receiver error: %s; will retry after visibility timeout", err.Error())
-						s.Svc.ChangeMessageVisibility(&sqs.ChangeMessageVisibilityInput{
+
+						params := &sqs.ChangeMessageVisibilityInput{
 							QueueUrl:          aws.String(s.QueueURL),
 							ReceiptHandle:     sqsMsg.ReceiptHandle,
 							VisibilityTimeout: aws.Int64(s.retryTimeout),
-						})
+						}
+						if _, err := s.Svc.ChangeMessageVisibility(params); err != nil {
+							log.Printf("[ERROR] cannot change message visibility %s", err)
+						}
 						return
 					}
 
@@ -121,7 +125,7 @@ func (s *Server) Serve(r msg.Receiver) error {
 	}
 }
 
-var shutdownPollInterval = 500 * time.Millisecond
+const shutdownPollInterval = 500 * time.Millisecond
 
 // Shutdown stops the receipt of new messages and waits for routines
 // to complete or the passed in ctx to be canceled. msg.ErrServerClosed
@@ -220,7 +224,7 @@ func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg
 func getConf(s *Server) (*aws.Config, error) {
 	svc, ok := s.Svc.(*sqs.SQS)
 	if !ok {
-		return nil, errors.New("Svc could not be casted to a SQS client")
+		return nil, errors.New("svc could not be casted to a SQS client")
 	}
 	return &svc.Client.Config, nil
 }

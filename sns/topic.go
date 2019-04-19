@@ -34,7 +34,7 @@ type Topic struct {
 func getConf(t *Topic) (*aws.Config, error) {
 	svc, ok := t.Svc.(*sns.SNS)
 	if !ok {
-		return nil, errors.New("Svc could not be casted to a SNS client")
+		return nil, errors.New("svc could not be casted to a SNS client")
 	}
 	return &svc.Client.Config, nil
 }
@@ -209,7 +209,7 @@ func (w *MessageWriter) Close() error {
 	w.closed = true
 
 	params := &sns.PublishInput{
-		Message:  aws.String(string(w.buf.String())),
+		Message:  aws.String(w.buf.String()),
 		TopicArn: aws.String(w.topicARN),
 	}
 
