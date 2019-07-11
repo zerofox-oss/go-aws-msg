@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -15,6 +17,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	msg "github.com/zerofox-oss/go-msg"
 )
+
+// Topic configures and manages SQSAPI for sqs.MessageWriter
+type Topic struct {
+	QueueURL string
+	Svc      sqsiface.SQSAPI
+}
 
 // NewTopic returns an sqs.Topic with fully configured SQSAPI
 func NewTopic(queueURL string) (msg.Topic, error) {
@@ -36,15 +44,9 @@ func NewTopic(queueURL string) (msg.Topic, error) {
 	}
 
 	return &Topic{
-		Svc:      sqs.New(sess, conf),
 		QueueURL: queueURL,
+		Svc:      sqs.New(sess, conf),
 	}, nil
-}
-
-// Topic configures and manages SQSAPI for sqs.MessageWriter
-type Topic struct {
-	Svc      sqsiface.SQSAPI
-	QueueURL string
 }
 
 // NewWriter returns a new sqs.MessageWriter
@@ -52,25 +54,30 @@ func (t *Topic) NewWriter(ctx context.Context) msg.MessageWriter {
 	return &MessageWriter{
 		attributes: make(map[string][]string),
 		buf:        &bytes.Buffer{},
-		sqsClient:  t.Svc,
-		queueURL:   t.QueueURL,
 		ctx:        ctx,
+		queueURL:   t.QueueURL,
+		sqsClient:  t.Svc,
 	}
 }
 
-// MessageWriter writes data to a SQS Queue
+// MessageWriter writes data to a SQS Queue.
 type MessageWriter struct {
 	msg.MessageWriter
 
 	attributes msg.Attributes
 	buf        *bytes.Buffer
+	ctx        context.Context
 	closed     bool
 	mux        sync.Mutex
 
-	sqsClient sqsiface.SQSAPI
-	queueURL  string
+	// delaySeconds is a length of time to delay the SQS message.
+	delaySeconds int64
 
-	ctx context.Context
+	// sqsClient is the SQS interface
+	sqsClient sqsiface.SQSAPI
+
+	// queueURL is the URL to the queue.
+	queueURL string
 }
 
 // Attributes returns the msg.Attributes associated with the MessageWriter
@@ -78,7 +85,7 @@ func (w *MessageWriter) Attributes() *msg.Attributes {
 	return &w.attributes
 }
 
-// Write writes data to the MessageWriter's internal buffer
+// Write writes data to the MessageWriter's internal buffer.
 //
 // Once a MessageWriter is closed, it cannot be used again.
 func (w *MessageWriter) Write(p []byte) (int, error) {
@@ -92,7 +99,7 @@ func (w *MessageWriter) Write(p []byte) (int, error) {
 }
 
 // Close converts it's buffered data and attributes to an SQS message
-// and publishes it to a queue
+// and publishes it to a queue.
 //
 // Once a MessageWriter is closed, it cannot be used again.
 func (w *MessageWriter) Close() error {
@@ -105,8 +112,9 @@ func (w *MessageWriter) Close() error {
 	w.closed = true
 
 	params := &sqs.SendMessageInput{
-		MessageBody: aws.String(w.buf.String()),
-		QueueUrl:    aws.String(w.queueURL),
+		DelaySeconds: aws.Int64(w.delaySeconds),
+		MessageBody:  aws.String(w.buf.String()),
+		QueueUrl:     aws.String(w.queueURL),
 	}
 
 	if len(*w.Attributes()) > 0 {
@@ -116,6 +124,12 @@ func (w *MessageWriter) Close() error {
 	log.Printf("[TRACE] writing to sqs: %v", params)
 	_, err := w.sqsClient.SendMessageWithContext(w.ctx, params)
 	return err
+}
+
+// SetDelay sets a delay on the Message.
+// The delay must be between 0 and 900 seconds, according to the aws sdk.
+func (w *MessageWriter) SetDelay(delay time.Duration) {
+	w.delaySeconds = int64(math.Min(math.Max(delay.Seconds(), 0), 900))
 }
 
 // buildSNSAttributes converts msg.Attributes into SQS message attributes.
