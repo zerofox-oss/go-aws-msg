@@ -1,0 +1,8 @@
+linters:
+  enable-all: true
+  disable:
+    - lll
+    - scopelint
+run:
+  skip-dirs:
+    - vendor
