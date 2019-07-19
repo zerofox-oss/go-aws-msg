@@ -78,16 +78,22 @@ func WithRetries(delay time.Duration, max int) Option {
 //
 // Note: SQS has limited support for unicode characters.
 // - See http://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/limits-messages.html
-// Because we use SNS and SQS together, we recommended that SNS
-// messages are base64-encoded as a best practice.
-//
+// Because we use SNS and SQS together, we recommend
+// that SNS messages are base64-encoded as a best practice.
 // You may use NewUnencodedTopic if you wish to ignore the encoding step.
 func NewTopic(topicARN string, opts ...Option) (msg.Topic, error) {
-	sess, err := session.NewSession()
+	topic, err := NewUnencodedTopic(topicARN, opts...)
 	if err != nil {
 		return nil, err
 	}
+	return b64.Encoder(topic), nil
+}
 
+// NewUnencodedTopic creates an concrete SNS msg.Topic
+//
+// Messages published by the `Topic` returned will not
+// have the body base64-encoded.
+func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 	conf := &aws.Config{
 		Credentials: credentials.NewCredentials(&credentials.EnvProvider{}),
 		Region:      aws.String("us-west-2"),
@@ -102,48 +108,13 @@ func NewTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 		conf.Endpoint = aws.String(url)
 	}
 
-	t := &Topic{
-		Svc:      sns.New(sess, conf),
-		TopicARN: topicARN,
-		session:  sess,
-	}
-
-	// Default retryer
-	if err = WithRetries(2*time.Second, 7)(t); err != nil {
-		return nil, err
-	}
-
-	for _, opt := range opts {
-		if err = opt(t); err != nil {
-			return nil, fmt.Errorf("cannot set option: %s", err)
-		}
-	}
-
-	return b64.Encoder(t), nil
-}
-
-// NewUnencodedTopic creates an concrete SNS msg.Topic
-//
-// Messages published by the `Topic` returned will not
-// have the body base64-encoded.
-func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
-	sess, err := session.NewSession()
+	sess, err := session.NewSession(conf)
 	if err != nil {
 		return nil, err
 	}
 
-	conf := &aws.Config{
-		Credentials: credentials.NewCredentials(&credentials.EnvProvider{}),
-		Region:      aws.String("us-west-2"),
-	}
-
-	// http://docs.aws.amazon.com/sdk-for-go/api/aws/client/#Config
-	if url := os.Getenv("SNS_ENDPOINT"); url != "" {
-		conf.Endpoint = aws.String(url)
-	}
-
 	t := &Topic{
-		Svc:      sns.New(sess, conf),
+		Svc:      sns.New(sess),
 		TopicARN: topicARN,
 		session:  sess,
 	}
