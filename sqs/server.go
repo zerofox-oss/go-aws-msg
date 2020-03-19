@@ -26,11 +26,23 @@ import (
 
 func init() {
 	var b [8]byte
-	_, err := crand.Read(b[:])
-	if err != nil {
+
+	if _, err := crand.Read(b[:]); err != nil {
 		panic("cannot seed math/rand package with cryptographically secure random number generator")
 	}
+
 	rand.Seed(int64(binary.LittleEndian.Uint64(b[:])))
+}
+
+// ErrThrottleServer signals that the server should sleep for the duration
+// time before resuming work.
+type ErrThrottleServer struct {
+	err      error
+	Duration time.Duration
+}
+
+func (e ErrThrottleServer) Error() string {
+	return e.err.Error()
 }
 
 // Server represents a msg.Server for receiving messages
@@ -67,7 +79,6 @@ func (s *Server) convertToMsgAttrs(awsAttrs map[string]*sqs.MessageAttributeValu
 //
 // NewServer should be used prior to running Serve.
 func (s *Server) Serve(r msg.Receiver) error {
-
 	for {
 		select {
 
@@ -119,6 +130,12 @@ func (s *Server) Serve(r msg.Receiver) error {
 						}
 						if _, err := s.Svc.ChangeMessageVisibility(params); err != nil {
 							log.Printf("[ERROR] cannot change message visibility %s", err)
+						}
+
+						throttleErr, ok := err.(*ErrThrottleServer)
+						if ok {
+							log.Printf("[TRACE throttling received, sleeping for: %s]", throttleErr.Duration.String())
+							time.Sleep(throttleErr.Duration)
 						}
 						return
 					}
