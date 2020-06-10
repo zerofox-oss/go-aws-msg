@@ -249,3 +249,63 @@ func TestServer_ShutdownHard(t *testing.T) {
 		t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 	}
 }
+
+func TestWithRetryJitter_SetsValidJitter(t *testing.T) {
+	jitter := 10
+	msgs := newSQSMessages(0)
+	srv := newMockServer(1, newMockSQSAPI(msgs, t))
+	optionFunc := WithRetryJitter(int64(jitter))
+	err := optionFunc(srv)
+	if err != nil {
+		t.Errorf("Unexpected error %s", err)
+	}
+	if srv.retryJitter != int64(jitter) {
+		t.Errorf("Expected retryJitter to be %d", jitter)
+	}
+}
+
+func TestWithRetryJitter_ErrorOnInvalidJitter(t *testing.T) {
+	jitter := 1000
+	msgs := newSQSMessages(0)
+	srv := newMockServer(1, newMockSQSAPI(msgs, t))
+	optionFunc := WithRetryJitter(int64(jitter))
+	err := optionFunc(srv)
+	if err == nil {
+		t.Errorf("Expected error, received nil")
+	}
+	if !strings.HasPrefix(err.Error(), "invalid jitter:") {
+		t.Errorf("expected error to start with 'invalid jitter:', error is '%s'", err)
+	}
+}
+
+func TestGetVisiblityTimeout_NoJitter(t *testing.T) {
+	var retryTimeout int64 = 100
+	var jitter int64 = 0
+	val := getVisiblityTimeout(retryTimeout, jitter)
+	if val < (retryTimeout-jitter) || val > (retryTimeout+jitter) {
+		t.Errorf("val should be in the interval %d±%d", retryTimeout, jitter)
+	}
+}
+
+func TestGetVisiblityTimeout_ValidJitter(t *testing.T) {
+	var retryTimeout int64 = 100
+	var jitter int64 = 10
+	val := getVisiblityTimeout(retryTimeout, jitter)
+	if val < (retryTimeout-jitter) || val > (retryTimeout+jitter) {
+		t.Errorf("val should be in the interval %d±%d", retryTimeout, jitter)
+	}
+}
+
+func TestGetVisiblityTimeout_InvalidJitter(t *testing.T) {
+	var retryTimeout int64 = 100
+	var jitter int64 = 1000
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("Expected panic")
+		}
+	}()
+	val := getVisiblityTimeout(retryTimeout, jitter)
+	if val < (retryTimeout-jitter) || val > (retryTimeout+jitter) {
+		t.Errorf("val should be in the interval %d±%d", retryTimeout, jitter)
+	}
+}
