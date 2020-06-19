@@ -3,9 +3,12 @@ package sqs
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"time"
 
@@ -21,6 +24,15 @@ import (
 	msg "github.com/zerofox-oss/go-msg"
 )
 
+func init() {
+	var b [8]byte
+	_, err := crand.Read(b[:])
+	if err != nil {
+		panic("cannot seed math/rand package with cryptographically secure random number generator")
+	}
+	rand.Seed(int64(binary.LittleEndian.Uint64(b[:])))
+}
+
 // Server represents a msg.Server for receiving messages
 // from an AWS SQS Queue
 type Server struct {
@@ -31,6 +43,7 @@ type Server struct {
 
 	maxConcurrentReceives chan struct{} // The maximum number of message processing routines allowed
 	retryTimeout          int64         // Visbility Timeout for a message when a receiver fails
+	retryJitter           int64
 
 	receiverCtx        context.Context    // context used to control the life of receivers
 	receiverCancelFunc context.CancelFunc // CancelFunc for all receiver routines
@@ -102,7 +115,7 @@ func (s *Server) Serve(r msg.Receiver) error {
 						params := &sqs.ChangeMessageVisibilityInput{
 							QueueUrl:          aws.String(s.QueueURL),
 							ReceiptHandle:     sqsMsg.ReceiptHandle,
-							VisibilityTimeout: aws.Int64(s.retryTimeout),
+							VisibilityTimeout: aws.Int64(getVisiblityTimeout(s.retryTimeout, s.retryJitter)),
 						}
 						if _, err := s.Svc.ChangeMessageVisibility(params); err != nil {
 							log.Printf("[ERROR] cannot change message visibility %s", err)
@@ -123,6 +136,14 @@ func (s *Server) Serve(r msg.Receiver) error {
 			}
 		}
 	}
+}
+
+func getVisiblityTimeout(retryTimeout int64, retryJitter int64) int64 {
+	if retryJitter > retryTimeout {
+		panic("jitter must be less than or equal to retryTimeout")
+	}
+	minRetry, maxRetry := retryTimeout-retryJitter, retryTimeout+retryJitter
+	return int64(rand.Intn(int(maxRetry-minRetry)+1) + int(minRetry))
 }
 
 const shutdownPollInterval = 500 * time.Millisecond
@@ -257,6 +278,24 @@ func WithRetries(delay time.Duration, max int) Option {
 			Delay:   delay,
 		}
 		s.Svc = sqs.New(s.session, c)
+		return nil
+	}
+}
+
+// WithRetryJitter sets a value for Jitter on the VisibilityTimeout.
+// With jitter applied every message that needs to be retried will
+// have a visibility timeout in the interval:
+// [(visibilityTimeout - jitter), visibilityTimeout + jitter)]
+func WithRetryJitter(retryJitter int64) Option {
+	return func(s *Server) error {
+		if retryJitter > s.retryTimeout {
+			return fmt.Errorf(
+				"invalid jitter: %d. Jitter must be less or equal to the retryTimeout (%d)",
+				retryJitter,
+				s.retryTimeout,
+			)
+		}
+		s.retryJitter = retryJitter
 		return nil
 	}
 }

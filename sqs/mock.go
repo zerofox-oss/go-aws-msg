@@ -110,6 +110,7 @@ func newMockServer(concurrency int, mockSQS *mockSQSAPI) *Server {
 		serverCancelFunc:      serverCancelFunc,
 		QueueURL:              "https://myqueue.com",
 		Svc:                   mockSQS,
+		retryTimeout:          100,
 	}
 
 	return srv
