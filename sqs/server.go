@@ -26,15 +26,27 @@ import (
 
 func init() {
 	var b [8]byte
-	_, err := crand.Read(b[:])
-	if err != nil {
+
+	if _, err := crand.Read(b[:]); err != nil {
 		panic("cannot seed math/rand package with cryptographically secure random number generator")
 	}
+
 	rand.Seed(int64(binary.LittleEndian.Uint64(b[:])))
 }
 
+// ErrThrottleServer signals that the server should sleep for the duration
+// time before resuming work.
+type ErrThrottleServer struct {
+	Message  string
+	Duration time.Duration
+}
+
+func (e ErrThrottleServer) Error() string {
+	return fmt.Sprintf("error: %s - server throttled for %s", e.Message, e.Duration)
+}
+
 // Server represents a msg.Server for receiving messages
-// from an AWS SQS Queue
+// from an AWS SQS Queue.
 type Server struct {
 	// AWS QueueURL
 	QueueURL string
@@ -52,9 +64,10 @@ type Server struct {
 	session            *session.Session   // session used to re-create `Svc` when needed
 }
 
-// convertToMsgAttrs creates msg.Attributes from sqs.Message.Attributes
+// convertToMsgAttrs creates msg.Attributes from sqs.Message.Attributes.
 func (s *Server) convertToMsgAttrs(awsAttrs map[string]*sqs.MessageAttributeValue) msg.Attributes {
 	attr := msg.Attributes{}
+
 	for k, v := range awsAttrs {
 		attr.Set(k, *v.StringValue)
 	}
@@ -67,16 +80,13 @@ func (s *Server) convertToMsgAttrs(awsAttrs map[string]*sqs.MessageAttributeValu
 //
 // NewServer should be used prior to running Serve.
 func (s *Server) Serve(r msg.Receiver) error {
-
 	for {
 		select {
-
-		// Shuts down the server
 		case <-s.serverCtx.Done():
 			close(s.maxConcurrentReceives)
+
 			return msg.ErrServerClosed
 
-		// Receive Messages from SQS
 		default:
 			resp, err := s.Svc.ReceiveMessage(&sqs.ReceiveMessageInput{
 				MaxNumberOfMessages:   aws.Int64(10),
@@ -87,6 +97,7 @@ func (s *Server) Serve(r msg.Receiver) error {
 
 			if err != nil {
 				log.Printf("[ERROR] Could not read from SQS: %s", err.Error())
+
 				return err
 			}
 
@@ -107,9 +118,8 @@ func (s *Server) Serve(r msg.Receiver) error {
 						Attributes: s.convertToMsgAttrs(sqsMsg.MessageAttributes),
 						Body:       bytes.NewBufferString(*sqsMsg.Body),
 					}
-					err := r.Receive(s.receiverCtx, m)
 
-					if err != nil {
+					if err := r.Receive(s.receiverCtx, m); err != nil {
 						log.Printf("[ERROR] Receiver error: %s; will retry after visibility timeout", err.Error())
 
 						params := &sqs.ChangeMessageVisibilityInput{
@@ -119,6 +129,13 @@ func (s *Server) Serve(r msg.Receiver) error {
 						}
 						if _, err := s.Svc.ChangeMessageVisibility(params); err != nil {
 							log.Printf("[ERROR] cannot change message visibility %s", err)
+						}
+
+						throttleErr, ok := err.(ErrThrottleServer)
+						if ok {
+							log.Printf("[TRACE] throttling received, sleeping for: %s", throttleErr.Duration.String())
+
+							time.Sleep(throttleErr.Duration)
 						}
 						return
 					}
@@ -131,7 +148,6 @@ func (s *Server) Serve(r msg.Receiver) error {
 					if err != nil {
 						log.Printf("[ERROR] Delete message: %s", err.Error())
 					}
-
 				}(m)
 			}
 		}
