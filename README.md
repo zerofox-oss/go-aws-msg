@@ -1,7 +1,8 @@
 # go-aws-msg
 
-[![GoDoc](https://godoc.org/github.com/zerofox-oss/go-aws-msg?status.svg)](http://godoc.org/github.com/zerofox-oss/go-aws-msg)
-[![Build Status](https://travis-ci.org/zerofox-oss/go-aws-msg.svg?branch=master)](https://travis-ci.org/zerofox-oss/go-aws-msg)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zerofox-oss/go-aws-msg.svg)](https://pkg.go.dev/github.com/zerofox-oss/go-aws-msg)
+![lint](https://github.com/zerofox-oss/go-aws-msg/actions/workflows/golangci-lint.yml/badge.svg)
+![tests](https://github.com/zerofox-oss/go-aws-msg/actions/workflows/tests.yml/badge.svg)
 
 **AWS Pub/Sub Primitives for Go**
 
