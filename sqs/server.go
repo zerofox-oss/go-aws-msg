@@ -94,7 +94,6 @@ func (s *Server) Serve(r msg.Receiver) error {
 				QueueUrl:              aws.String(s.QueueURL),
 				MessageAttributeNames: []*string{aws.String("All")},
 			})
-
 			if err != nil {
 				log.Printf("[ERROR] Could not read from SQS: %s", err.Error())
 
@@ -158,7 +157,9 @@ func getVisiblityTimeout(retryTimeout int64, retryJitter int64) int64 {
 	if retryJitter > retryTimeout {
 		panic("jitter must be less than or equal to retryTimeout")
 	}
+
 	minRetry, maxRetry := retryTimeout-retryJitter, retryTimeout+retryJitter
+
 	return int64(rand.Intn(int(maxRetry-minRetry)+1) + int(minRetry))
 }
 
@@ -172,6 +173,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		panic("context not set")
 	}
+
 	s.serverCancelFunc()
 
 	ticker := time.NewTicker(shutdownPollInterval)
@@ -181,8 +183,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			s.receiverCancelFunc()
-			return ctx.Err()
 
+			return ctx.Err()
 		case <-ticker.C:
 			if len(s.maxConcurrentReceives) == 0 {
 				return msg.ErrServerClosed
@@ -213,6 +215,7 @@ func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg
 	if err != nil {
 		return nil, err
 	}
+
 	conf := &aws.Config{
 		Credentials: credentials.NewCredentials(&credentials.EnvProvider{}),
 		Region:      aws.String("us-west-2"),
@@ -263,6 +266,7 @@ func getConf(s *Server) (*aws.Config, error) {
 	if !ok {
 		return nil, errors.New("svc could not be casted to a SQS client")
 	}
+
 	return &svc.Client.Config, nil
 }
 
@@ -273,8 +277,10 @@ func WithCustomRetryer(r request.Retryer) Option {
 		if err != nil {
 			return err
 		}
+
 		c.Retryer = r
 		s.Svc = sqs.New(s.session, c)
+
 		return nil
 	}
 }
@@ -289,11 +295,14 @@ func WithRetries(delay time.Duration, max int) Option {
 		if err != nil {
 			return err
 		}
+
 		c.Retryer = retryer.DefaultRetryer{
 			Retryer: client.DefaultRetryer{NumMaxRetries: max},
 			Delay:   delay,
 		}
+
 		s.Svc = sqs.New(s.session, c)
+
 		return nil
 	}
 }
@@ -311,7 +320,9 @@ func WithRetryJitter(retryJitter int64) Option {
 				s.retryTimeout,
 			)
 		}
+
 		s.retryJitter = retryJitter
+
 		return nil
 	}
 }

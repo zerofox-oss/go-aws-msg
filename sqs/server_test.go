@@ -29,7 +29,6 @@ func (r *FailingReceiver) Receive(ctx context.Context, m *msg.Message) error {
 	default:
 		return errors.New("failing recevier returned error")
 	}
-
 }
 
 // SimpleReceiver simply returns nil upon consumption of a Message.
