@@ -1,8 +1,7 @@
 linters:
-  enable-all: true
-  disable:
-    - lll
-    - scopelint
+  disable-all: true
+  presets:
+    - format
 run:
   skip-dirs:
     - vendor
