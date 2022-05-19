@@ -18,7 +18,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sns/snsiface"
-
 	"github.com/zerofox-oss/go-aws-msg/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 	b64 "github.com/zerofox-oss/go-msg/decorators/base64"
