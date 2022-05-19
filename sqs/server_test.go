@@ -198,7 +198,31 @@ func TestServer_ConvertToMsgAttrs(t *testing.T) {
 		},
 	}
 	serv := &Server{}
-	attrs := serv.convertToMsgAttrs(awsMsg.MessageAttributes)
+	attrs := msg.Attributes{}
+	serv.convertToMsgAttrs(attrs, awsMsg.MessageAttributes)
+	if attrs.Get("key1") != val1 {
+		t.Error("key1 does not match")
+	}
+	if attrs.Get("key2") != val2 {
+		t.Error("key2 does not match")
+	}
+}
+
+// Test conversion of sqs.Message.Attributes to msg.Attributes.
+func TestServer_ConvertToAttrs(t *testing.T) {
+	val1 := "val1"
+	val2 := "val2"
+	str := "Attribute Test"
+	awsMsg := &sqs.Message{
+		Body: &str,
+		Attributes: map[string]*string{
+			"key1": &val1,
+			"key2": &val2,
+		},
+	}
+	serv := &Server{}
+	attrs := msg.Attributes{}
+	serv.convertToAttrs(attrs, awsMsg.Attributes)
 	if attrs.Get("key1") != val1 {
 		t.Error("key1 does not match")
 	}

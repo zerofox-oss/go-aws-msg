@@ -19,7 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
-
 	"github.com/zerofox-oss/go-aws-msg/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 )
@@ -65,13 +64,17 @@ type Server struct {
 }
 
 // convertToMsgAttrs creates msg.Attributes from sqs.Message.Attributes.
-func (s *Server) convertToMsgAttrs(awsAttrs map[string]*sqs.MessageAttributeValue) msg.Attributes {
-	attr := msg.Attributes{}
-
+func (s *Server) convertToMsgAttrs(attr msg.Attributes, awsAttrs map[string]*sqs.MessageAttributeValue) {
 	for k, v := range awsAttrs {
 		attr.Set(k, *v.StringValue)
 	}
-	return attr
+}
+
+// convertToAttrs creates msg.Attributes from sqs.Attributes.
+func (s *Server) convertToAttrs(attr msg.Attributes, attrs map[string]*string) {
+	for k, v := range attrs {
+		attr.Set(k, *v)
+	}
 }
 
 // Serve continuously receives messages from an SQS queue, creates a message,
@@ -92,6 +95,7 @@ func (s *Server) Serve(r msg.Receiver) error {
 				MaxNumberOfMessages:   aws.Int64(10),
 				WaitTimeSeconds:       aws.Int64(20),
 				QueueUrl:              aws.String(s.QueueURL),
+				AttributeNames:        []*string{aws.String("All")},
 				MessageAttributeNames: []*string{aws.String("All")},
 			})
 			if err != nil {
@@ -113,8 +117,16 @@ func (s *Server) Serve(r msg.Receiver) error {
 						<-s.maxConcurrentReceives
 					}()
 
+					// set the sqs attributes first
+					// and the custom message attributes after
+					// as they may override the regular attributes
+
+					attrs := msg.Attributes{}
+					s.convertToAttrs(attrs, sqsMsg.Attributes)
+					s.convertToMsgAttrs(attrs, sqsMsg.MessageAttributes)
+
 					m := &msg.Message{
-						Attributes: s.convertToMsgAttrs(sqsMsg.MessageAttributes),
+						Attributes: attrs,
 						Body:       bytes.NewBufferString(*sqsMsg.Body),
 					}
 
