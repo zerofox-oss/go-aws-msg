@@ -1,12 +1,32 @@
 name: golangci-lint
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
 jobs:
   golangci:
     name: lint
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - go-version: 1.17.x
+            lint-version: v1.44.2
+          - go-version: 1.18.x
+            lint-version: v1.47.3
     steps:
-      - uses: actions/checkout@v2
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          version: latest
+          go-version: ${{ matrix.go-version }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          args: -v
+          version: ${{ matrix.lint-version }}
