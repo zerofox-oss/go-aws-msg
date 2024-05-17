@@ -1,11 +1,44 @@
-name: tests
-on: [push, pull_request]
+name: go-aws-msg
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
 jobs:
-  tests:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.17.x, 1.18.x]
+        include:
+          - go-version: 1.17.x
+            lint-version: v1.44.2
+          - go-version: 1.18.x
+            lint-version: v1.47.3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          args: -v
+          version: ${{ matrix.lint-version }}
+
+  tests:
+    name: tests
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - go-version: 1.17.x
+          - go-version: 1.18.x
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
@@ -13,4 +46,4 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: "tests"
-        run: go test ./...
+        run: go test ./... -race
