@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/yurizf/go-aws-msg-with-batching/awsinterfaces"
 	"log"
 	"os"
 	"strings"
@@ -17,17 +18,36 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sns/snsiface"
-	"github.com/zerofox-oss/go-aws-msg/retryer"
+	"github.com/yurizf/go-aws-msg-with-batching/batching"
+	"github.com/yurizf/go-aws-msg-with-batching/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 	b64 "github.com/zerofox-oss/go-msg/decorators/base64"
 )
 
 // Topic configures and manages SNSAPI for sns.MessageWriter.
 type Topic struct {
-	Svc      snsiface.SNSAPI
+	//Svc      snsiface.SNSAPI
+	Svc      awsinterfaces.SNSPublisher
 	TopicARN string
 	session  *session.Session
+}
+
+var toBatch bool
+
+// BatchON turns on SNS Batching to save the costs.
+// It starts the batching engine by calling batching.New(batching.SNS)
+func BatchON() {
+	batching.New(batching.SNS)
+	toBatch = true
+}
+
+// BatchOFF - drains the batch queue called to shut down the batching engine.
+// Usually called on a termination signal
+func BatchOFF() {
+	toBatch = false
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	batching.ShutDown(ctx)
+	defer cancel()
 }
 
 func getConf(t *Topic) (*aws.Config, error) {
@@ -129,7 +149,11 @@ func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 		}
 	}
 
-	return t, nil
+	if toBatch {
+		batching.NewTopic(topicARN, t.Svc, 2*time.Second)
+	}
+
+	return t, err
 }
 
 // NewWriter returns a sns.MessageWriter instance for writing to
@@ -153,7 +177,8 @@ type MessageWriter struct {
 	closed     bool
 	mux        sync.Mutex
 
-	snsClient snsiface.SNSAPI
+	//snsClient snsiface.SNSAPI
+	snsClient awsinterfaces.SNSPublisher
 	topicARN  string
 
 	ctx context.Context
@@ -185,6 +210,11 @@ func (w *MessageWriter) Close() error {
 
 	if len(*w.Attributes()) > 0 {
 		params.MessageAttributes = buildSNSAttributes(w.Attributes())
+	}
+
+	if toBatch {
+		batching.SetAttributes(w.topicARN, params.MessageAttributes)
+		return batching.Append(w.topicARN, w.buf.String())
 	}
 
 	log.Printf("[TRACE] writing to sns: %v", params)

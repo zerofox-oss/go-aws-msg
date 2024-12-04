@@ -3,6 +3,7 @@ package sqs
 import (
 	"bytes"
 	"context"
+	"github.com/yurizf/go-aws-msg-with-batching/awsinterfaces"
 	"log"
 	"math"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	"github.com/yurizf/go-aws-msg-with-batching/batching"
 	msg "github.com/zerofox-oss/go-msg"
 )
 
@@ -22,6 +24,23 @@ import (
 type Topic struct {
 	QueueURL string
 	Svc      sqsiface.SQSAPI
+}
+
+var toBatch bool
+
+// Starts the batching engine
+func BatchON() {
+	batching.New(batching.SQS)
+	toBatch = true
+}
+
+// BatchOFF - drains the batch queue and stops the batching engine
+// Usually called on a termination signal
+func BatchOFF() {
+	toBatch = false
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	batching.ShutDown(ctx)
 }
 
 // NewTopic returns an sqs.Topic with fully configured SQSAPI
@@ -43,9 +62,16 @@ func NewTopic(queueURL string) (msg.Topic, error) {
 		conf.Endpoint = aws.String(url)
 	}
 
+	svc := sqs.New(sess, conf)
+
+	if toBatch {
+		// defgault timeout
+		batching.NewTopic(queueURL, svc, 1*time.Second)
+	}
+
 	return &Topic{
 		QueueURL: queueURL,
-		Svc:      sqs.New(sess, conf),
+		Svc:      svc,
 	}, nil
 }
 
@@ -74,7 +100,8 @@ type MessageWriter struct {
 	delaySeconds int64
 
 	// sqsClient is the SQS interface
-	sqsClient sqsiface.SQSAPI
+	// sqsClient sqsiface.SQSAPI
+	sqsClient awsinterfaces.SQSSender
 
 	// queueURL is the URL to the queue.
 	queueURL string
@@ -121,15 +148,23 @@ func (w *MessageWriter) Close() error {
 		params.MessageAttributes = buildSQSAttributes(w.Attributes())
 	}
 
+	if toBatch {
+		batching.SetAttributes(w.queueURL, params.MessageAttributes)
+		return batching.Append(w.queueURL, w.buf.String())
+	}
+
 	log.Printf("[TRACE] writing to sqs: %v", params)
 	_, err := w.sqsClient.SendMessageWithContext(w.ctx, params)
 	return err
 }
 
 // SetDelay sets a delay on the Message.
-// The delay must be between 0 and 900 seconds, according to the aws sdk.
+// The delay must be between 0 and 900 seconds, according to the awsinterfaces sdk.
 func (w *MessageWriter) SetDelay(delay time.Duration) {
 	w.delaySeconds = int64(math.Min(math.Max(delay.Seconds(), 0), 900))
+	if toBatch {
+		batching.SetTopicTimeout(w.queueURL, time.Duration(w.delaySeconds)*time.Second)
+	}
 }
 
 // buildSNSAttributes converts msg.Attributes into SQS message attributes.

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/yurizf/go-aws-msg-with-batching/awsinterfaces"
 	"log"
 	"math/rand"
 	"os"
@@ -18,10 +19,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
-	"github.com/zerofox-oss/go-aws-msg/retryer"
+	"github.com/yurizf/go-aws-msg-with-batching/batching"
+	"github.com/yurizf/go-aws-msg-with-batching/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 )
+
+func BatchServer() {
+	toBatch = true
+}
 
 func init() {
 	var b [8]byte
@@ -50,7 +55,8 @@ type Server struct {
 	// AWS QueueURL
 	QueueURL string
 	// Concrete instance of SQSAPI
-	Svc sqsiface.SQSAPI
+	//Svc sqsiface.SQSAPI
+	Svc awsinterfaces.SQSReceiver
 
 	maxConcurrentReceives chan struct{} // The maximum number of message processing routines allowed
 	retryTimeout          int64         // Visbility Timeout for a message when a receiver fails
@@ -86,6 +92,7 @@ func (s *Server) Serve(r msg.Receiver) error {
 	for {
 		select {
 		case <-s.serverCtx.Done():
+			log.Printf("[TRACE] Closing Serve chan")
 			close(s.maxConcurrentReceives)
 
 			return msg.ErrServerClosed
@@ -109,6 +116,10 @@ func (s *Server) Serve(r msg.Receiver) error {
 					log.Printf("[TRACE] Received SQS Message: %s\n", *m.MessageId)
 				}
 
+				if toBatch {
+					err = s.serveBatch(m, r)
+					continue
+				}
 				// Take a slot from the buffered channel
 				s.maxConcurrentReceives <- struct{}{}
 
@@ -165,6 +176,79 @@ func (s *Server) Serve(r msg.Receiver) error {
 	}
 }
 
+func (s *Server) serveBatch(m *sqs.Message, r msg.Receiver) error {
+
+	msgs, err := batching.Debatch(*m.Body)
+	if err != nil {
+		log.Printf("[ERROR] cannot debatch message%s: %s", err, *m.Body)
+		return err
+	}
+
+	// delete batch from SQS right away
+	_, err = s.Svc.DeleteMessage(&sqs.DeleteMessageInput{
+		QueueUrl:      aws.String(s.QueueURL),
+		ReceiptHandle: m.ReceiptHandle,
+	})
+
+	if err != nil {
+		log.Printf("[ERROR] Delete message: %s", err.Error())
+	}
+
+	attrs := msg.Attributes{}
+	s.convertToAttrs(attrs, m.Attributes)
+	s.convertToMsgAttrs(attrs, m.MessageAttributes)
+
+	for ok := true; ok; ok = len(msgs) > 0 {
+		select {
+		case <-s.serverCtx.Done():
+			log.Printf("[TRACE] Context is done")
+			close(s.maxConcurrentReceives)
+			return msg.ErrServerClosed
+
+		default:
+			failed := make([]string, 0, 128)
+
+			for _, payload := range msgs {
+				// Take a slot from the buffered channel
+				// parallelize like unbatched messages
+				s.maxConcurrentReceives <- struct{}{}
+
+				go func(attrs msg.Attributes, payload string) {
+					defer func() {
+						<-s.maxConcurrentReceives
+					}()
+
+					m_p := &msg.Message{
+						Attributes: attrs,
+						Body:       bytes.NewBufferString(payload),
+					}
+
+					if err := r.Receive(s.receiverCtx, m_p); err != nil {
+						log.Printf("[ERROR] Receiver error: %s; will retry after visibility timeout", err.Error())
+
+						failed = append(failed, payload)
+
+						throttleErr, ok := err.(ErrThrottleServer)
+						if ok {
+							log.Printf("[TRACE] throttling received, sleeping for: %s", throttleErr.Duration.String())
+
+							time.Sleep(throttleErr.Duration)
+						}
+						return
+					}
+
+				}(attrs, payload)
+			}
+
+			// reprocess failed messages
+			msgs = failed
+		}
+	}
+
+	return err
+
+}
+
 func getVisiblityTimeout(retryTimeout int64, retryJitter int64) int64 {
 	if retryJitter > retryTimeout {
 		panic("jitter must be less than or equal to retryTimeout")
@@ -215,7 +299,7 @@ type Option func(*Server) error
 // as environment variables.
 //
 // SQS_ENDPOINT can be set as an environment variable in order to
-// override the aws.Client's Configured Endpoint
+// override the awsinterfaces.Client's Configured Endpoint
 func NewServer(queueURL string, cl int, retryTimeout int64, opts ...Option) (msg.Server, error) {
 	// It makes no sense to have a concurrency of less than 1.
 	if cl < 1 {

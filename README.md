@@ -4,6 +4,10 @@
 ![lint](https://github.com/zerofox-oss/go-aws-msg/actions/workflows/golangci-lint.yml/badge.svg)
 ![tests](https://github.com/zerofox-oss/go-aws-msg/actions/workflows/tests.yml/badge.svg)
 
+**This is a fork of https://github.com/zerofox-oss/go-aws-msg with added message [batching](#Batching) for cost control
+This post claims that they managed reduce SQS costs by 90% by batching the messages
+https://www.moengage.com/blog/reduce-sqs-cost/
+
 **AWS Pub/Sub Primitives for Go**
 
 This library contains
@@ -50,3 +54,16 @@ with SNS and SQS.
 [SNS]: https://aws.amazon.com/documentation/sns/
 [SNS-PubSub]: https://aws.amazon.com/sns/#SNSpubsub
 [SQS]: https://aws.amazon.com/documentation/sqs/
+
+## Batching
+
+A package 'batching' has been added. On the client side it would spawn a go routine that
+runs a 'batching engine'. The message won't be immediately send to SNS/SQS but will be put
+on the queue instead via batching.Append call. The actual send occurs either when Append
+sees that the queued messages with this extra payload exceed 250K in total or
+when the batching engine detects a topic timeout that is specified in batching.NewTopic call.
+The higher level packages sqs and sns were added functions BatchON and BatchOFF to turn batching on and off.
+In theory, turning batching on and off should be possible without restart. 
+The server side that reads SQS messages has a call sqs.BatchServer() that switches the 
+package to reading/parsing/processing batches of messages instead of single ones.
+Obviously, client and server need to be in sync when it comes to batching.

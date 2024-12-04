@@ -1,18 +1,18 @@
 package sns
 
 import (
+	"github.com/yurizf/go-aws-msg-with-batching/awsinterfaces"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sns/snsiface"
 )
 
 // mockSNSAPI satisfies the sns.snsiface interface. It handles calls to Publish
 // during testing.
 type mockSNSAPI struct {
-	snsiface.SNSAPI
+	awsinterfaces.SNSPublisher
 
 	sentParamChan chan *sns.PublishInput
 	t             *testing.T

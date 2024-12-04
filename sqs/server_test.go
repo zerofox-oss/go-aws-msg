@@ -1,6 +1,7 @@
 package sqs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,11 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/yurizf/go-aws-msg-with-batching/batching"
 	msg "github.com/zerofox-oss/go-msg"
 )
 
@@ -83,6 +86,75 @@ func TestServer_Serve(t *testing.T) {
 	}
 }
 
+type BatchReceiver struct {
+	t        *testing.T
+	payloads []string
+	mux      sync.Mutex
+	received []string
+}
+
+func (r *BatchReceiver) Receive(ctx context.Context, m *msg.Message) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(m.Body)
+		s := buf.String()
+		r.mux.Lock()
+		defer r.mux.Unlock()
+		r.received = append(r.received, s)
+		r.t.Log(fmt.Printf("batch receiver called for %s", s))
+		for _, p := range r.payloads {
+			if s == p {
+				return nil
+			}
+		}
+		return fmt.Errorf("payload %s is not expected", s)
+	}
+}
+
+// TestServer_Serve tests that an SQS server can receive messages, process
+// them, and delete them from the queue successfully.
+func TestServer_ServeBatched(t *testing.T) {
+	msgs := newSQSMessages(1)
+	toBatch = true
+	defer func() {
+		toBatch = false
+	}()
+
+	(*msgs)[0].Body = aws.String(batching.Batch([]string{"12345", "文字材料"}))
+	mockSQS := newMockSQSAPI(msgs, t)
+	srv := newMockServer(1, mockSQS)
+
+	r := &BatchReceiver{
+		t:        t,
+		payloads: []string{"12345", "文字材料"},
+		received: make([]string, 0, 2),
+	}
+
+	go func() {
+		if err := srv.Serve(r); err != nil { // Serve spawns go routines calling Receive func for each msg
+			t.Log(fmt.Sprintf("server shut down: err %s", err))
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := mockSQS.WaitForAllDeletes(ctx); err != nil {
+		t.Errorf(err.Error())
+	}
+
+	// give Recievers go routines some time to finish their job
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	srv.Shutdown(ctx) // shutdown shuts Server right away and stops Recive go routines after ^^ timeout
+
+	if r.received[0] != "12345" || r.received[1] != "文字材料" {
+		t.Errorf("Instead of the expected processing order got %v", r.received)
+	}
+}
+
 func TestServer_Serve_retries(t *testing.T) {
 	retries := make([]*http.Request, 0, 3)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +162,12 @@ func TestServer_Serve_retries(t *testing.T) {
 		t.Logf("Request: %s\n", b)
 		retries = append(retries, r)
 		w.WriteHeader(403)
-		fmt.Fprintln(w, `<?xml version="1.0"?><ErrorResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/"><Error><Type>Sender</Type><Code>InvalidClientTokenId</Code><Message>The security token included in the request is invalid.</Message><Detail/></Error><RequestId>ee1c20d5-2537-5e47-97b1-73909c83231a</RequestId></ErrorResponse>`)
+		fmt.Fprintln(w, `
+			{
+    			"__type": "com.amazonaws.sqs#InvalidClientTokenId",
+                "message": "The security token included in the request is invalid."
+			}
+		`)
 	}))
 	defer ts.Close()
 

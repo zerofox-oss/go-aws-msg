@@ -4,17 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/yurizf/go-aws-msg-with-batching/awsinterfaces"
 	"math"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 )
 
-// mockSQSAPI satisfies the sqs.sqsiface interface. It handles tracking calls
+// mockSQSAPI satisfies the necessary subset of sqs.sqsiface interface.
+// It handles tracking calls
 // to ReceiveMessage, DeleteMessage, and others to handle test assertions.
 type mockSQSAPI struct {
-	sqsiface.SQSAPI
+	awsinterfaces.SQSSender
+	awsinterfaces.SQSReceiver
 
 	Queue  []*sqs.Message
 	dmChan chan struct{} // each time a message is deleted a struct is written to this channel
