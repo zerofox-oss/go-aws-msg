@@ -3,7 +3,6 @@ package sns
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -17,28 +16,41 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sns/snsiface"
-	"github.com/zerofox-oss/go-aws-msg/retryer"
+	"github.com/yurizf/go-aws-msg-costs-control/awsinterfaces"
+	"github.com/yurizf/go-aws-msg-costs-control/batching"
+	"github.com/yurizf/go-aws-msg-costs-control/partialbase64encode"
+	"github.com/yurizf/go-aws-msg-costs-control/retryer"
 	msg "github.com/zerofox-oss/go-msg"
 	b64 "github.com/zerofox-oss/go-msg/decorators/base64"
 )
 
+// DI to support mocking
+var NewSNSPublisherFunc = func(sess *session.Session, cfgs ...*aws.Config) awsinterfaces.SNSPublisher {
+	if len(cfgs) == 0 {
+		return sns.New(sess)
+	} else {
+		return sns.New(sess, cfgs...)
+	}
+}
+
 // Topic configures and manages SNSAPI for sns.MessageWriter.
 type Topic struct {
-	Svc      snsiface.SNSAPI
+	Svc      awsinterfaces.SNSPublisher
 	TopicARN string
 	session  *session.Session
+	Batcher  batching.Batcher
 }
 
 func getConf(t *Topic) (*aws.Config, error) {
-	svc, ok := t.Svc.(*sns.SNS)
-	if !ok {
-		return nil, errors.New("svc could not be casted to a SNS client")
+	switch v := t.Svc.(type) {
+	case *sns.SNS:
+		return &(v.Client.Config), nil
+	default: // for testing
+		return &aws.Config{}, nil
 	}
-	return &svc.Client.Config, nil
 }
 
-// Option is the signature that modifies a `Topic` to set some configuration
+// Option is the signature that modifies a `Batcher` to set some configuration
 type Option func(*Topic) error
 
 // WithCustomRetryer sets a custom `Retryer` to use on the SQS client.
@@ -49,7 +61,7 @@ func WithCustomRetryer(r request.Retryer) Option {
 			return err
 		}
 		c.Retryer = r
-		t.Svc = sns.New(t.session, c)
+		t.Svc = NewSNSPublisherFunc(t.session, c)
 		return nil
 	}
 }
@@ -68,7 +80,7 @@ func WithRetries(delay time.Duration, max int) Option {
 			Retryer: client.DefaultRetryer{NumMaxRetries: max},
 			Delay:   delay,
 		}
-		t.Svc = sns.New(t.session, c)
+		t.Svc = NewSNSPublisherFunc(t.session, c)
 		return nil
 	}
 }
@@ -88,9 +100,24 @@ func NewTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 	return b64.Encoder(topic), nil
 }
 
+// NewPartialBASE64Topic returns a sns.Topic with fully configured SNSAPI.
+//
+// Note: SQS has limited support for unicode characters.
+// - See http://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/limits-messages.html
+// Because we use SNS and SQS together, we recommend
+// that SNS messages are *partially* base64-encoded: only the unicode fragments not supported by SQS are encoded.
+// You may use NewUnencodedTopic if you wish to ignore the encoding step.
+func NewPartialBASE64Topic(topicARN string, opts ...Option) (msg.Topic, error) {
+	topic, err := NewUnencodedTopic(topicARN, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return partialbase64encode.Encoder(topic), nil
+}
+
 // NewUnencodedTopic creates an concrete SNS msg.Topic
 //
-// Messages published by the `Topic` returned will not
+// Messages published by the `Batcher` returned will not
 // have the body base64-encoded.
 func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 	conf := &aws.Config{
@@ -113,7 +140,7 @@ func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 	}
 
 	t := &Topic{
-		Svc:      sns.New(sess),
+		Svc:      NewSNSPublisherFunc(sess),
 		TopicARN: topicARN,
 		session:  sess,
 	}
@@ -129,21 +156,54 @@ func NewUnencodedTopic(topicARN string, opts ...Option) (msg.Topic, error) {
 		}
 	}
 
-	return t, nil
+	return t, err
+}
+
+// NewBatchedTopic creates an concrete SNS msg.Topic
+// It returns msg.Topic as opposed to BatchedTopic so that existing
+// calls to NewTopic could simply replace it with NewBatchedTopic
+// Messages published by the `Batcher` returned will be partially
+// base64-encoded: only runes SQS does not support will be encoded.
+// And these messages will be batched for transmission.
+type BatchedTopic interface {
+	msg.Topic
+	batching.Batcher
+}
+type BatchedTopicS struct {
+	msg.Topic
+	batching.Batcher
+}
+
+func NewBatchedTopic(topicARN string, timeout ...time.Duration) (BatchedTopic, error) {
+	to := batching.DEFAULT_BATCH_TIMEOUT
+	if len(timeout) > 0 {
+		to = timeout[0]
+	}
+
+	t, err := NewUnencodedTopic(topicARN)
+	if err == nil {
+		concrete := t.(*Topic)
+		b, err := batching.New(topicARN, concrete.Svc, to)
+		concrete.Batcher = b
+		return BatchedTopicS{concrete, b}, err
+	}
+
+	return nil, err
 }
 
 // NewWriter returns a sns.MessageWriter instance for writing to
-// the configured SNS topic.
+// the configured SNS Topic.
 func (t *Topic) NewWriter(ctx context.Context) msg.MessageWriter {
 	return &MessageWriter{
 		attributes: make(map[string][]string),
 		snsClient:  t.Svc,
 		topicARN:   t.TopicARN,
 		ctx:        ctx,
+		batcher:    t.Batcher,
 	}
 }
 
-// MessageWriter writes data to an output SNS topic as configured via its
+// MessageWriter writes data to an output SNS batcher as configured via its
 // topicARN.
 type MessageWriter struct {
 	msg.MessageWriter
@@ -153,10 +213,11 @@ type MessageWriter struct {
 	closed     bool
 	mux        sync.Mutex
 
-	snsClient snsiface.SNSAPI
+	snsClient awsinterfaces.SNSPublisher
 	topicARN  string
+	ctx       context.Context
 
-	ctx context.Context
+	batcher batching.Batcher
 }
 
 // Attributes returns the msg.Attributes associated with the MessageWriter.
@@ -177,6 +238,15 @@ func (w *MessageWriter) Close() error {
 		return msg.ErrClosedMessageWriter
 	}
 	w.closed = true
+
+	if w.batcher != nil {
+		attrs := *w.Attributes()
+		attrs[batching.ENCODING_ATTRIBUTE_KEY] = []string{batching.ENCODING_ATTRIBUTE_VALUE}
+
+		w.batcher.SetAttributes(buildSNSAttributes(w.Attributes()))
+		// putting Encode code here, next to the attributes assignment
+		return w.batcher.Append(partialbase64encode.Encode(w.buf.String()))
+	}
 
 	params := &sns.PublishInput{
 		Message:  aws.String(w.buf.String()),

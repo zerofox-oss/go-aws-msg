@@ -14,18 +14,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	"github.com/yurizf/go-aws-msg-costs-control/awsinterfaces"
+	"github.com/yurizf/go-aws-msg-costs-control/batching"
+	"github.com/yurizf/go-aws-msg-costs-control/partialbase64encode"
 	msg "github.com/zerofox-oss/go-msg"
 )
 
-// Topic configures and manages SQSAPI for sqs.MessageWriter
-type Topic struct {
-	QueueURL string
-	Svc      sqsiface.SQSAPI
-}
-
-// NewTopic returns an sqs.Topic with fully configured SQSAPI
-func NewTopic(queueURL string) (msg.Topic, error) {
+// DI to support mocking
+var NewSQSSenderFunc = func() (awsinterfaces.SQSSender, error) {
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
@@ -43,10 +39,46 @@ func NewTopic(queueURL string) (msg.Topic, error) {
 		conf.Endpoint = aws.String(url)
 	}
 
+	return sqs.New(sess, conf), nil
+}
+
+// Topic configures and manages SQSAPI for sqs.MessageWriter
+type Topic struct {
+	QueueURL string
+	Svc      awsinterfaces.SQSSender
+	Batcher  batching.Batcher
+}
+
+// NewTopic returns an sqs.Topic with fully configured SQSAPI
+func NewTopic(queueURL string) (msg.Topic, error) {
+
+	svc, err := NewSQSSenderFunc()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Topic{
 		QueueURL: queueURL,
-		Svc:      sqs.New(sess, conf),
+		Svc:      svc,
 	}, nil
+}
+
+func NewBatchedTopic(queueURL string, timeout ...time.Duration) (batching.Batcher, error) {
+	to := batching.DEFAULT_BATCH_TIMEOUT
+	if len(timeout) > 0 {
+		to = timeout[0]
+	}
+
+	t, err := NewTopic(queueURL)
+	if err == nil {
+		tt, _ := t.(*Topic)
+		if b, err := batching.New(queueURL, tt.Svc, to); err == nil {
+			tt.Batcher = b
+			return b, err
+		}
+	}
+
+	return nil, err
 }
 
 // NewWriter returns a new sqs.MessageWriter
@@ -57,6 +89,7 @@ func (t *Topic) NewWriter(ctx context.Context) msg.MessageWriter {
 		ctx:        ctx,
 		queueURL:   t.QueueURL,
 		sqsClient:  t.Svc,
+		batchTopic: t.Batcher,
 	}
 }
 
@@ -74,10 +107,12 @@ type MessageWriter struct {
 	delaySeconds int64
 
 	// sqsClient is the SQS interface
-	sqsClient sqsiface.SQSAPI
+	sqsClient awsinterfaces.SQSSender
 
 	// queueURL is the URL to the queue.
 	queueURL string
+
+	batchTopic batching.Batcher
 }
 
 // Attributes returns the msg.Attributes associated with the MessageWriter
@@ -111,6 +146,14 @@ func (w *MessageWriter) Close() error {
 	}
 	w.closed = true
 
+	if w.batchTopic != nil {
+		attrs := *w.Attributes()
+		attrs[batching.ENCODING_ATTRIBUTE_KEY] = []string{batching.ENCODING_ATTRIBUTE_VALUE}
+		w.batchTopic.SetAttributes(buildSQSAttributes(w.Attributes()))
+		// putting Encode code here, next to the attributes assignment
+		return w.batchTopic.Append(partialbase64encode.Encode(w.buf.String()))
+	}
+
 	params := &sqs.SendMessageInput{
 		DelaySeconds: aws.Int64(w.delaySeconds),
 		MessageBody:  aws.String(w.buf.String()),
@@ -127,9 +170,12 @@ func (w *MessageWriter) Close() error {
 }
 
 // SetDelay sets a delay on the Message.
-// The delay must be between 0 and 900 seconds, according to the aws sdk.
+// The delay must be between 0 and 900 seconds, according to the awsinterfaces sdk.
 func (w *MessageWriter) SetDelay(delay time.Duration) {
 	w.delaySeconds = int64(math.Min(math.Max(delay.Seconds(), 0), 900))
+	if w.batchTopic != nil {
+		w.batchTopic.SetTopicTimeout(time.Duration(w.delaySeconds) * time.Second)
+	}
 }
 
 // buildSNSAttributes converts msg.Attributes into SQS message attributes.

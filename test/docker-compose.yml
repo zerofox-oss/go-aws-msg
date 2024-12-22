@@ -1,0 +1,78 @@
+version: '3'
+
+services:
+  client:
+    image: golang:1.21
+    # Official Go Image: The official Go Docker image sets /go as the default GOPATH
+    volumes:
+      - ..:/go/src/github.com/yurizf/go-aws-msg-with-batching
+    # entrypoint: sh -c "pwd && ls -laF"
+    entrypoint: ./run.sh
+    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/hilvlclient
+    environment:
+      - LOG_LEVEL=debug
+      - AWS_ACCESS_KEY=${ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${SECRET_ACCESS_KEY}
+      - TOPIC_ARN=${SNS_TOPIC_ARN}
+      - AWS_REGION=us-west-2
+      - AWS_DEFAULT_REGION=us-west-2
+      - TOTAL_MESSAGES=${TOTAL_MESSAGES}
+      - MIN_MSG_LEN=${MIN_LEN}
+      - MAX_MSG_LEN=${MAX_LEN}
+      - CONCURRENCY=${CONCURRENCY}
+      - DO_DB=${DO_DB}
+      - DB_URL=postgresql://name:password@postgres:5432/tests
+    restart: no
+    deploy:
+      resources:
+        limits:
+          # t2.small - 1 CPU/2G
+          cpus: 0.35
+  server:
+    image: golang:1.21
+    volumes:
+      # PATH in the image: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - ..:/go/src/github.com/yurizf/go-aws-msg-with-batching
+    # entrypoint: sh -c "pwd && ls -laF"
+    entrypoint: ./run.sh
+    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/server
+    environment:
+      - LOG_LEVEL=debug
+      - AWS_ACCESS_KEY=${ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${SECRET_ACCESS_KEY}
+      - AWS_REGION=us-west-2
+      - AWS_DEFAULT_REGION=us-west-2
+      - TOPIC_URL=${SQS_TOPIC_URL}
+      - TOTAL_MESSAGES=${TOTAL_MESSAGES}
+      - DO_DB=${DO_DB}
+      - DB_URL=postgresql://name:password@postgres:5432/tests
+    restart: no
+    deploy:
+      resources:
+        limits:
+          # t2.small - 1 CPU/2G
+          cpus: 0.35
+  postgres:
+    image: "postgres:15"
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
+      # PGDATA: "/data/postgres"
+    # https://stackoverflow.com/a/60326527/24810373
+    volumes:
+      # - postgres:/data/postgres
+      - ./init.sql:/docker-entrypoint-initdb.d/10-init.sql
+    ports:
+      - "15432:5432"
+    # https://github.com/compose-spec/compose-spec/blob/main/spec.md#restart
+    restart: no
+    deploy:
+      resources:
+        limits:
+          # t2.small - 1 CPU/2G
+          cpus: 0.2
+
+  pgclient:
+    image: jbergknoff/postgresql-client
+    restart: no
+    entrypoint: tail -f /dev/null
