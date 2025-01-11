@@ -1,0 +1,17 @@
+module github.com/yurizf/go-aws-msg-costs-control/test/client_server
+
+go 1.21
+
+// require github.com/yurizf/go-aws-msg-with-batching
+
+require github.com/yurizf/go-aws-msg-costs-control v0.0.0
+
+require github.com/davecgh/go-spew v1.1.1 // indirect
+
+replace github.com/yurizf/go-aws-msg-costs-control v0.0.0 => ../..
+
+require (
+	github.com/aws/aws-sdk-go v1.55.5
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/zerofox-oss/go-msg v0.1.4
+)

@@ -10,8 +10,6 @@ github.com/jmespath/go-jmespath/internal/testify v1.5.1/go.mod h1:L3OGu8Wl2/fWfC
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
-github.com/yurizf/slice-on-disk v0.2.0 h1:I0hivH66uz/g1zS0bmHoyE0LsffpWAxFJiS1WnkuqWM=
-github.com/yurizf/slice-on-disk v0.2.0/go.mod h1:2S0d5GCKZRPk2KWX6FF10LyFMlPutK/TUtk2sf3QpeI=
 github.com/zerofox-oss/go-msg v0.1.4 h1:PC7C/g5ib1q3nTsAn4PAKm1pV/V7i040XZ6yyXHwWog=
 github.com/zerofox-oss/go-msg v0.1.4/go.mod h1:aufjMFVwHky5G5vusDXOmVhPmsnrL3+0ejG02Y9i41w=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
