@@ -122,6 +122,26 @@ This encoding sets the following message attribute: value
 "Content-Transfer-Encoding": "partially-base64"
 ```
 
+### Tests results
+
+The tests I ran show significant potential cost savings. 
+Here are the results from sending and receiving 5,000 randomly generated strings with lengths between 100 to 120,000 unicode chars,
+including non SQS supported ones. With 5 parallel batchers (threads), here are the results
+
+```bash
+topic-5 **** cost savings (after deadline): (prepared/sent) messages: 1033/1033, batches: 575/575
+topic-1 **** cost savings (after deadline): (prepared/sent) messages: 973/973, batches: 534/534
+topic-4 **** cost savings (after deadline): (prepared/sent) messages: 1003/1003, batches: 551/551
+topic-2 **** cost savings (after deadline): (prepared/sent) messages: 1013/1013, batches: 557/557
+topic-3 **** cost savings (after deadline): (prepared/sent) messages: 979/979, batches: 520/520
+```
+
+As you can see, it should result in ~50% costs reduction. 
+It's far from 90% savings claimed by the quoted article but still very significant.
+I suppose if you send/receive short messages and your message to batch ratio is like 10 to 1, you can realistically get those 90%
+
+
+
 
 
 
