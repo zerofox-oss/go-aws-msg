@@ -16,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/yurizf/go-aws-msg-costs-control/awsinterfaces"
 	"github.com/yurizf/go-aws-msg-costs-control/batching"
-	"github.com/yurizf/go-aws-msg-costs-control/partialbase64encode"
 	msg "github.com/zerofox-oss/go-msg"
 )
 
@@ -147,11 +146,8 @@ func (w *MessageWriter) Close() error {
 	w.closed = true
 
 	if w.batchTopic != nil {
-		attrs := *w.Attributes()
-		attrs[batching.ENCODING_ATTRIBUTE_KEY] = []string{batching.ENCODING_ATTRIBUTE_VALUE}
-		w.batchTopic.SetAttributes(buildSQSAttributes(w.Attributes()))
-		// putting Encode code here, next to the attributes assignment
-		return w.batchTopic.Append(partialbase64encode.Encode(w.buf.String()))
+		// encoding attributes r set and encoding is done in the batcher
+		return w.batchTopic.Append(w.buf.String())
 	}
 
 	params := &sqs.SendMessageInput{

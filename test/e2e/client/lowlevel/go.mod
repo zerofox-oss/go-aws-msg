@@ -1,4 +1,4 @@
-module github.com/yurizf/go-aws-msg-costs-control/test/client
+module github.com/yurizf/go-aws-msg-costs-control/test/e2e/client/lowlevel
 
 go 1.21
 
@@ -16,7 +16,7 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 )
 
-replace github.com/yurizf/go-aws-msg-costs-control v0.0.0 => ../..
+replace github.com/yurizf/go-aws-msg-costs-control v0.0.0 => ./../../../..
 
 require (
 	github.com/aws/aws-sdk-go v1.55.5 // indirect

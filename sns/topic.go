@@ -240,12 +240,8 @@ func (w *MessageWriter) Close() error {
 	w.closed = true
 
 	if w.batcher != nil {
-		attrs := *w.Attributes()
-		attrs[batching.ENCODING_ATTRIBUTE_KEY] = []string{batching.ENCODING_ATTRIBUTE_VALUE}
-
-		w.batcher.SetAttributes(buildSNSAttributes(w.Attributes()))
-		// putting Encode code here, next to the attributes assignment
-		return w.batcher.Append(partialbase64encode.Encode(w.buf.String()))
+		// encoding attributes r set and encoding is done in Append.
+		return w.batcher.Append(w.buf.String())
 	}
 
 	params := &sns.PublishInput{

@@ -36,9 +36,10 @@ var MAX_MSG_LENGTH int = LENGTH_OF_256K - len(ENCODING_ATTRIBUTE_KEY) - len(ENCO
 
 const DEFAULT_BATCH_TIMEOUT = 2 * time.Second
 
+// it might be gob encoded. So, the fields are public
 type msg struct {
-	placed  time.Time
-	payload string
+	Placed  time.Time
+	Payload string
 }
 
 var id = struct {
@@ -60,7 +61,7 @@ type Batcher interface {
 	SetAttributes(attrs any)
 	SetTopicTimeout(timeout time.Duration)
 
-	ShutDown(ctx context.Context) error
+	ShutDown(ctx context.Context, drain ...bool) error
 
 	ID() string
 	DebugON()
@@ -94,6 +95,7 @@ type TopicStruct struct {
 	batchLength int
 
 	debug                bool
+	draining             bool
 	preparedMsgCount     int64
 	preparedBatchesCount int64
 	sentMsgCount         int64
@@ -126,7 +128,7 @@ func (t *TopicStruct) SetAttributes(attrs any) {
 }
 
 func (t *TopicStruct) tryToAppend(m msg) bool {
-	toAdd := fragmentLen(m.payload) // + length of the whole batch
+	toAdd := fragmentLen(m.Payload) // + length of the whole batch
 	if t.batchLength+toAdd > MAX_MSG_LENGTH {
 		return false
 	}
@@ -136,9 +138,10 @@ func (t *TopicStruct) tryToAppend(m msg) bool {
 	return true
 }
 
-// Append - batch analogue of "send". Adds the payload to the current batch
-// payload must be already partially base64 encoded!
+// Append - batch analogue of "send". Adds the Payload to the current batch
+// Payload must be already partially base64 encoded!
 func (t *TopicStruct) Append(payload string) error {
+	payload = partialbase64encode.Encode(payload)
 	switch {
 	case len(payload) > MAX_MSG_LENGTH:
 		return fmt.Errorf("message is too long: %d", len(payload))
@@ -165,6 +168,11 @@ func (t *TopicStruct) send(payload string) error {
 	var err error = nil
 	switch t.queueType {
 	case SNS:
+		t.snsAttributes[ENCODING_ATTRIBUTE_KEY] = &sns.MessageAttributeValue{
+			DataType:    aws.String("String"),
+			StringValue: aws.String(strings.Join([]string{ENCODING_ATTRIBUTE_VALUE}, ",")),
+		}
+
 		params := &sns.PublishInput{
 			Message:  aws.String(payload),
 			TopicArn: aws.String(t.arnOrUrl),
@@ -188,6 +196,11 @@ func (t *TopicStruct) send(payload string) error {
 			break
 		}
 	case SQS:
+		t.sqsAttributes[ENCODING_ATTRIBUTE_KEY] = &sqs.MessageAttributeValue{
+			DataType:    aws.String("String"),
+			StringValue: aws.String(strings.Join([]string{ENCODING_ATTRIBUTE_VALUE}, ",")),
+		}
+
 		params := &sqs.SendMessageInput{
 			MessageBody: aws.String(payload),
 			QueueUrl:    aws.String(t.arnOrUrl),
@@ -277,7 +290,7 @@ func New(topicARN string, p any, timeout time.Duration, concurrency ...int) (Bat
 		for {
 			select {
 			case <-topic.batcherCtx.Done():
-				log.Printf("[INFO] %s: batching engine is shutting down. queued payload length is %d; overflow %d; resend %d", topic.id, len(topic.batch), topic.overflow.Len(), len(topic.resend))
+				log.Printf("[INFO] %s: batching engine is shutting down. queued Payload length is %d; overflow %d; resend %d", topic.id, len(topic.batch), topic.overflow.Len(), len(topic.resend))
 				close(topic.concurrency)
 				return
 
@@ -310,7 +323,7 @@ func New(topicARN string, p any, timeout time.Duration, concurrency ...int) (Bat
 					topic.resend = tmp
 				}
 
-				if len(topic.batch) > 0 && time.Now().Sub(topic.batch[0].placed) > topic.timeout {
+				if len(topic.batch) > 0 && time.Now().Sub(topic.batch[0].Placed) > topic.timeout {
 					log.Printf("[TRACE] sending batch of size %d", len(topic.batch))
 					s := topic.buildPayload()
 
@@ -353,7 +366,7 @@ func (t *TopicStruct) buildPayload() string {
 
 	var sb strings.Builder
 	for _, m := range t.batch {
-		sb.WriteString(partialbase64encode.PrefixWithLength(m.payload))
+		sb.WriteString(partialbase64encode.PrefixWithLength(m.Payload))
 	}
 
 	t.batch = make([]msg, 0, 128)
@@ -391,9 +404,36 @@ func (t *TopicStruct) processOverflow() int {
 // by calling cancel on the batcher context.
 // It expects a context with a timeout to be passed to delay the shutdown
 // so that all already accumulated messages could be sent.
-func (t *TopicStruct) ShutDown(ctx context.Context) error {
+func (t *TopicStruct) ShutDown(ctx context.Context, drain ...bool) error {
 	if ctx == nil {
 		panic("context not set in shutdown batcher")
+	}
+
+	if len(drain) > 0 {
+		t.draining = drain[0]
+	}
+
+	// wait till all generated have been sent
+	ticker := time.NewTicker(15 * time.Second)
+	keepGoing := true
+	cnt := 0
+	for keepGoing {
+		select {
+		case <-ticker.C: //blocking
+			cnt++
+			if cnt < 240 {
+				log.Printf("[TRACE]. up to 1 hour of wait for all batches to be sent expired")
+				if len(t.batch) > 0 || t.overflow.Len() > 0 || len(t.resend) > 0 {
+					log.Printf("[ERROR].  %s is not done yet: batched:%d, overflow:%d, resend:%dd", t.id, len(t.batch), t.overflow.Len(), len(t.resend))
+				} else {
+					log.Printf("[INFO].  %s is done", t.id)
+					keepGoing = false
+				}
+			} else {
+				log.Printf("[INFO].  %s draining for 1 hour. exiting", t.id)
+				keepGoing = false
+			}
+		}
 	}
 
 	t.overflow.Cleanup()

@@ -167,7 +167,7 @@ func TestBoth(t *testing.T) {
 			for k := 0; k < MSG_PER_TOPIC; k++ {
 				str := common.RandString(100, 15000)
 				str = fmt.Sprintf("msg-%d:%s:%s", k, topic.ID(), str)
-				// t.Logf("sending length %d: %s", len(str), str[:30])
+
 				w := topic.NewWriter(ctx)
 				_, err := w.Write([]byte(str))
 				if err != nil {
@@ -182,7 +182,7 @@ func TestBoth(t *testing.T) {
 
 			ctxt, cancel := context.WithTimeout(ctx, TOPIC_TIMEOUT_TO_DRAIN_BATCH_QUEUE)
 			defer cancel()
-			topic.ShutDown(ctxt)
+			topic.ShutDown(ctxt, true)
 		}(i)
 	}
 
