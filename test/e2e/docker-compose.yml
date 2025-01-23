@@ -1,14 +1,68 @@
 version: '3'
 
 services:
-  client:
+  client-multibatcher:
     image: golang:1.21
     # Official Go Image: The official Go Docker image sets /go as the default GOPATH
     volumes:
       - ..:/go/src/github.com/yurizf/go-aws-msg-with-batching
     # entrypoint: sh -c "pwd && ls -laF"
     entrypoint: ./run.sh
-    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/hilvlclient
+    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/client/e2e/fivebatchers
+    environment:
+      - LOG_LEVEL=debug
+      - AWS_ACCESS_KEY=${ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${SECRET_ACCESS_KEY}
+      - TOPIC_ARN=${SNS_TOPIC_ARN}
+      - AWS_REGION=us-west-2
+      - AWS_DEFAULT_REGION=us-west-2
+      - TOTAL_MESSAGES=${TOTAL_MESSAGES}
+      - MIN_MSG_LEN=${MIN_LEN}
+      - MAX_MSG_LEN=${MAX_LEN}
+      - CONCURRENCY=${CONCURRENCY}
+      - DO_DB=${DO_DB}
+      - DB_URL=postgresql://name:password@postgres:5432/tests
+    restart: no
+    deploy:
+      resources:
+        limits:
+          # t2.small - 1 CPU/2G
+          cpus: 0.35
+  client-singlebatcher:
+    image: golang:1.21
+    # Official Go Image: The official Go Docker image sets /go as the default GOPATH
+    volumes:
+      - ..:/go/src/github.com/yurizf/go-aws-msg-with-batching
+    # entrypoint: sh -c "pwd && ls -laF"
+    entrypoint: ./run.sh
+    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/e2e/client/threadsafety
+    environment:
+      - LOG_LEVEL=debug
+      - AWS_ACCESS_KEY=${ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${SECRET_ACCESS_KEY}
+      - TOPIC_ARN=${SNS_TOPIC_ARN}
+      - AWS_REGION=us-west-2
+      - AWS_DEFAULT_REGION=us-west-2
+      - TOTAL_MESSAGES=${TOTAL_MESSAGES}
+      - MIN_MSG_LEN=${MIN_LEN}
+      - MAX_MSG_LEN=${MAX_LEN}
+      - CONCURRENCY=${CONCURRENCY}
+      - DO_DB=${DO_DB}
+      - DB_URL=postgresql://name:password@postgres:5432/tests
+    restart: no
+    deploy:
+      resources:
+        limits:
+          # t2.small - 1 CPU/2G
+          cpus: 0.35
+  client-lowlevel:
+    image: golang:1.21
+    # Official Go Image: The official Go Docker image sets /go as the default GOPATH
+    volumes:
+      - ..:/go/src/github.com/yurizf/go-aws-msg-with-batching
+    # entrypoint: sh -c "pwd && ls -laF"
+    entrypoint: ./run.sh
+    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/e2e/client/lowlevel
     environment:
       - LOG_LEVEL=debug
       - AWS_ACCESS_KEY=${ACCESS_KEY}
@@ -35,7 +89,7 @@ services:
       - ..:/go/src/github.com/yurizf/go-aws-msg-with-batching
     # entrypoint: sh -c "pwd && ls -laF"
     entrypoint: ./run.sh
-    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/server
+    working_dir: /go/src/github.com/yurizf/go-aws-msg-with-batching/test/e2e/server
     environment:
       - LOG_LEVEL=debug
       - AWS_ACCESS_KEY=${ACCESS_KEY}

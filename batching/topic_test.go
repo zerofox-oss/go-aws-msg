@@ -48,7 +48,7 @@ func Test_SNS(t *testing.T) {
 					p: func(ctx aws.Context, input *sns.PublishInput, _ ...request.Option) (*sns.PublishOutput, error) {
 						msgs, err := DeBatch(*input.Message)
 						if err != nil {
-							t.Fatalf("Failed to debatch the payload %v", err)
+							t.Fatalf("Failed to debatch the Payload %v", err)
 						}
 						if len(msgs) != 5 {
 							t.Fatalf("Wrong number of messages. Expected 5. Got %d", len(msgs))
