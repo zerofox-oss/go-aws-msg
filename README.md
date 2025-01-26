@@ -68,6 +68,13 @@ The server side that reads SQS messages has a call sqs.BatchServer() that switch
 package to reading/parsing/processing batches of messages instead of single ones.
 Obviously, client and server need to be in sync when it comes to batching.
 
+You can use the higher level primitives carried over from the original repo
+by calling `sns/sqs.NewBatchedTopic` or instantiate the batching engine
+directly via the `batching.New` and passing it the sns/sqs client.
+The test subdirectory contains a comprehensive tests battery demonstrating
+both approaches. The implementation is thread safe: you can reuse
+the same batched topic or lower level batcher engine across multiple go routines
+
 ### Packing Multiple Messages into a Batch
 
 When multiple messages are batched together into a single one, each of them is simply prefixed by 
@@ -77,7 +84,6 @@ Say we have these 3 messages to batch:
 ```shell
 []string{"ABC", strings.Repeat("杂志等中区别", 1000), strings.Repeat("志", 200000)}
 ```
-
 
 The batch will look like below, without the blanks put there for readability
 

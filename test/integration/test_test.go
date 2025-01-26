@@ -11,11 +11,13 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/yurizf/go-aws-msg-costs-control/awsinterfaces"
 	"github.com/yurizf/go-aws-msg-costs-control/batching"
+	"github.com/yurizf/go-aws-msg-costs-control/partialbase64encode"
 	sns2 "github.com/yurizf/go-aws-msg-costs-control/sns"
 	sqs2 "github.com/yurizf/go-aws-msg-costs-control/sqs"
 	"github.com/yurizf/go-aws-msg-costs-control/test/common"
 	"github.com/zerofox-oss/go-msg"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	// "sync/atomic"
@@ -25,7 +27,7 @@ import (
 
 const TOPICS_NUM = 3
 const MSG_PER_TOPIC = 1000
-const TOPIC_TIMEOUT_TO_DRAIN_BATCH_QUEUE = 30 * time.Second
+const TOPIC_TIMEOUT = 3 * time.Second
 const SQS_SRV_SHUTDOWN_TIMEOUT = 10 * time.Second
 
 type singletonQueue struct {
@@ -63,10 +65,10 @@ func (m *mockSNSSQS) ReceiveMessage(in *sqs.ReceiveMessageInput) (*sqs.ReceiveMe
 	if l64 > int64(len(m.queue.msgs)) {
 		l64 = int64(len(m.queue.msgs))
 	}
-	max := int(l64)
+	mx := int(l64)
 
 	out := sqs.ReceiveMessageOutput{
-		Messages: make([]*sqs.Message, max),
+		Messages: make([]*sqs.Message, mx),
 	}
 
 	atrrValue := batching.ENCODING_ATTRIBUTE_VALUE
@@ -80,12 +82,12 @@ func (m *mockSNSSQS) ReceiveMessage(in *sqs.ReceiveMessageInput) (*sqs.ReceiveMe
 			ReceiptHandle: &msgID,
 		}
 		m.queue.receivedMsgs[msgID] = v
-		if i == max-1 {
+		if i == mx-1 {
 			break
 		}
 	}
-	m.queue.first = m.queue.first + max
-	m.queue.msgs = m.queue.msgs[max:]
+	m.queue.first = m.queue.first + mx
+	m.queue.msgs = m.queue.msgs[mx:]
 
 	return &out, nil
 }
@@ -128,7 +130,8 @@ func (m *stats) log(str string) {
 	m.mux.Unlock()
 }
 
-func TestBoth(t *testing.T) {
+// testing go-aws-msg level primitives with batching
+func TestHighLevel(t *testing.T) {
 
 	sns2.NewSNSPublisherFunc = func(sess *session.Session, cfgs ...*aws.Config) awsinterfaces.SNSPublisher {
 		return &mockSNSSQS{
@@ -180,14 +183,11 @@ func TestBoth(t *testing.T) {
 				}
 			}
 
-			ctxt, cancel := context.WithTimeout(ctx, TOPIC_TIMEOUT_TO_DRAIN_BATCH_QUEUE)
+			ctxt, cancel := context.WithTimeout(ctx, TOPIC_TIMEOUT)
 			defer cancel()
 			topic.ShutDown(ctxt, true)
 		}(i)
 	}
-
-	// just wait ill everything has been sent
-	wg.Wait()
 
 	// receiver:
 	sqsSrv, err := sqs2.NewServer("blah", 10, int64(30))
@@ -220,11 +220,119 @@ func TestBoth(t *testing.T) {
 		t.Logf("existing go func with Serve...")
 	}()
 
+	// just wait ill everything has been sent
+	wg.Wait()
+	watchQueue(t)
+	ctxt, cancel := context.WithTimeout(context.Background(), SQS_SRV_SHUTDOWN_TIMEOUT)
+	defer cancel()
+	sqsSrv.Shutdown(ctxt)
+
+	t.Logf("******** RECEIVED MESSAGES %d **********", trace.count)
+	if trace.count != TOPICS_NUM*MSG_PER_TOPIC {
+		t.Logf("%d %v", trace.count, trace.msgs)
+		t.Errorf("expected number of received messages %d not equal to actual %d", trace.count, TOPICS_NUM*MSG_PER_TOPIC)
+	}
+}
+
+// testing the batcher directly, without go-aws-msg primitives
+func TestLowLevel(t *testing.T) {
+
+	// senders
+	var wg sync.WaitGroup
+	for i := 0; i < TOPICS_NUM; i++ {
+		wg.Add(1)
+		go func(j int) {
+			defer func(j int) {
+				wg.Done()
+				t.Logf("exiting batcher-%d sender", j)
+			}(j)
+			batcher, err := batching.New("blah", &mockSNSSQS{queue: &theQueue}, 2*time.Second)
+			if err != nil {
+				t.Errorf("cannot create batcher blah: %v", err)
+				return
+			}
+			batcher.DebugON()
+			ctx := context.Background()
+			for k := 0; k < MSG_PER_TOPIC; k++ {
+				str := common.RandString(100, 15000)
+				str = fmt.Sprintf("msg-%d:%s:%s", k, batcher.ID(), str)
+
+				err := batcher.Append(str)
+				if err != nil {
+					t.Errorf("[ERROR] %s Failed to append %d bytes: %s", batcher.ID(), len(str), err)
+					return
+				}
+			}
+
+			ctxt, cancel := context.WithTimeout(ctx, TOPIC_TIMEOUT)
+			defer cancel()
+			batcher.ShutDown(ctxt, true)
+		}(i)
+	}
+
+	// receiver:
+	ch := make(chan struct{})
+	go func(ch chan struct{}) {
+		receiver := &mockSNSSQS{queue: &theQueue}
+		for {
+			select {
+			case _, ok := <-ch:
+				if !ok {
+					log.Printf("[INFO] receiver hannel is closed. Shutting down. Exiting go routine")
+					return
+				}
+			default:
+				resp, _ := receiver.ReceiveMessage(&sqs.ReceiveMessageInput{
+					MaxNumberOfMessages:   aws.Int64(10),
+					WaitTimeSeconds:       aws.Int64(20),
+					QueueUrl:              aws.String("blah"),
+					MessageAttributeNames: []*string{aws.String("All")},
+				})
+
+				for _, batch := range resp.Messages {
+					receiver.DeleteMessage(
+						&sqs.DeleteMessageInput{
+							QueueUrl:      aws.String("blah"),
+							ReceiptHandle: batch.ReceiptHandle,
+						})
+					msgs, err := batching.DeBatch(*batch.Body)
+					if err != nil {
+						t.Errorf("[ERROR] cannot debatch message [%s]: %s\n---------------", err, *batch.Body)
+					}
+					for _, str := range msgs {
+						str, err = partialbase64encode.Decode(str)
+						if err != nil {
+							t.Errorf("[ERROR] failed to decode msg %v %v", err, []rune(str))
+							continue
+						}
+						t.Logf("received length %d: %s", len(str), str[:30])
+						if !strings.HasPrefix(str, "msg-") {
+							t.Errorf("unrecohnized message %s", str)
+						}
+						trace.increment(str[:30])
+					}
+				}
+			}
+		}
+	}(ch)
+
+	// just wait ill everything has been sent
+	wg.Wait()
+	watchQueue(t)
+	close(ch)
+
+	t.Logf("******** RECEIVED MESSAGES %d **********", trace.count)
+	if trace.count != TOPICS_NUM*MSG_PER_TOPIC {
+		t.Logf("%d %v", trace.count, trace.msgs)
+		t.Errorf("expected number of received messages %d not equal to actual %d", trace.count, TOPICS_NUM*MSG_PER_TOPIC)
+	}
+}
+
+func watchQueue(t *testing.T) {
 	// stop condition: the queue is empty for 15 seconds
 	ticker := time.NewTicker(5 * time.Second)
 	countZeros := 0
 
-checkQueue:
 	for {
 		msgsInFlight := len(theQueue.msgs)
 		select {
@@ -234,11 +342,8 @@ checkQueue:
 				countZeros++
 				if countZeros > 3 {
 					t.Logf("shutting down sqsSrv with the timeout %s", SQS_SRV_SHUTDOWN_TIMEOUT)
-					ctxt, cancel := context.WithTimeout(context.Background(), SQS_SRV_SHUTDOWN_TIMEOUT)
-					defer cancel()
 					ticker.Stop()
-					sqsSrv.Shutdown(ctxt)
-					break checkQueue
+					return
 				}
 			}
 		case <-time.After(1 * time.Second):
@@ -247,11 +352,5 @@ checkQueue:
 				countZeros = 0
 			}
 		}
-	}
-
-	t.Logf("******** RECEIVED MESSAGES %d **********", trace.count)
-	if trace.count != TOPICS_NUM*MSG_PER_TOPIC {
-		t.Logf("%d %v", trace.count, trace.msgs)
-		t.Errorf("expected number of received messages %d not equal to actual %d", trace.count, TOPICS_NUM*MSG_PER_TOPIC)
 	}
 }
