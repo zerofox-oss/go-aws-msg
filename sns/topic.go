@@ -164,6 +164,8 @@ func (w *MessageWriter) Attributes() *msg.Attributes {
 	return &w.attributes
 }
 
+func (w *MessageWriter) SetDelay(_ time.Duration) {}
+
 // Close converts the MessageWriter's Body and Attributes to sns.PublishInput
 // in order to publish itself to the MessageWriter's snsClient.
 //
