@@ -155,7 +155,6 @@ func (s *Server) Serve(r msg.Receiver) error {
 						QueueUrl:      aws.String(s.QueueURL),
 						ReceiptHandle: sqsMsg.ReceiptHandle,
 					})
-
 					if err != nil {
 						log.Printf("[ERROR] Delete message: %s", err.Error())
 					}

@@ -2,6 +2,3 @@ linters:
   disable-all: true
   presets:
     - format
-run:
-  skip-dirs:
-    - vendor
